@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from datetime import date
 
+from app.domain.enums import NotificationKind
+
 
 @dataclass(frozen=True, slots=True)
 class DailyParticipant:
@@ -50,3 +52,23 @@ class OpenedDaily:
     panel: DailyPanel
     channel_id: int
     message_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReminderRecipient:
+    """Pending participant who should be mentioned in one reminder."""
+
+    user_id: int
+    display_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedReminder:
+    """Persisted reminder reservation ready for Discord publication."""
+
+    notification_id: int
+    session_id: int
+    project_name: str
+    channel_id: int
+    kind: NotificationKind
+    recipients: tuple[ReminderRecipient, ...]

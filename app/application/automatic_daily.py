@@ -8,10 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily import DailyService, _open_project_session
-from app.application.daily_dto import OpenedDaily
-from app.application.errors import ValidationError
-from app.domain.enums import ProjectStatus
+from app.application.daily_dto import (
+    OpenedDaily,
+    PreparedReminder,
+    ReminderRecipient,
+)
+from app.application.errors import ConflictError, NotFoundError, ValidationError
+from app.domain.enums import AssignmentStatus, NotificationKind, ProjectStatus, SessionStatus
 from app.infrastructure.database.models import (
+    DailyAssignment,
+    DailyNotification,
     DailySession,
     Guild,
     Project,
@@ -42,6 +48,42 @@ class AutomaticDailyService:
                 opened.append(result)
         return tuple(opened)
 
+    async def prepare_reminders(
+        self,
+        discord_guild_id: int,
+        local_date: date,
+        kind: NotificationKind,
+    ) -> tuple[PreparedReminder, ...]:
+        """Reserve one reminder per open session after recalculating pending members."""
+
+        session_ids = await self._open_session_ids(discord_guild_id, local_date)
+        reminders: list[PreparedReminder] = []
+        for session_id in session_ids:
+            reminder = await self._reserve_reminder(
+                discord_guild_id,
+                session_id,
+                local_date,
+                kind,
+            )
+            if reminder is not None:
+                reminders.append(reminder)
+        return tuple(reminders)
+
+    async def attach_notification(self, notification_id: int, message_id: int) -> None:
+        """Confirm a reserved reminder after its Discord message is published."""
+
+        if message_id <= 0:
+            raise ValidationError("A mensagem de lembrete publicada é inválida.")
+        async with self._sessions() as session, session.begin():
+            notification = await session.get(DailyNotification, notification_id)
+            if notification is None:
+                raise NotFoundError("Reserva de lembrete não encontrada.")
+            if notification.message_id not in (None, message_id):
+                raise ConflictError("Este lembrete já possui outra mensagem publicada.")
+            notification.message_id = message_id
+            if notification.sent_at is None:
+                notification.sent_at = self._now()
+
     async def _eligible_project_ids(self, discord_guild_id: int) -> tuple[int, ...]:
         has_active_member = exists(
             select(ProjectMembership.id).where(
@@ -64,6 +106,94 @@ class AutomaticDailyService:
                 )
             ).all()
             return tuple(values)
+
+    async def _open_session_ids(self, discord_guild_id: int, local_date: date) -> tuple[int, ...]:
+        async with self._sessions() as session:
+            values = (
+                await session.scalars(
+                    select(DailySession.id)
+                    .join(Project, Project.id == DailySession.project_id)
+                    .join(Guild, Guild.id == Project.guild_id)
+                    .where(
+                        Guild.discord_guild_id == discord_guild_id,
+                        DailySession.session_date == local_date,
+                        DailySession.status == SessionStatus.OPEN,
+                    )
+                    .order_by(Project.name, DailySession.id)
+                )
+            ).all()
+            return tuple(values)
+
+    async def _reserve_reminder(
+        self,
+        discord_guild_id: int,
+        session_id: int,
+        local_date: date,
+        kind: NotificationKind,
+    ) -> PreparedReminder | None:
+        try:
+            async with self._sessions() as session, session.begin():
+                row = (
+                    await session.execute(
+                        select(DailySession, Project)
+                        .join(Project, Project.id == DailySession.project_id)
+                        .join(Guild, Guild.id == Project.guild_id)
+                        .where(
+                            Guild.discord_guild_id == discord_guild_id,
+                            DailySession.id == session_id,
+                            DailySession.session_date == local_date,
+                            DailySession.status == SessionStatus.OPEN,
+                        )
+                    )
+                ).one_or_none()
+                if row is None:
+                    return None
+                daily_session, project = row
+                existing = await session.scalar(
+                    select(DailyNotification.id).where(
+                        DailyNotification.session_id == session_id,
+                        DailyNotification.kind == kind,
+                    )
+                )
+                if existing is not None:
+                    return None
+                assignments = (
+                    await session.scalars(
+                        select(DailyAssignment)
+                        .where(
+                            DailyAssignment.session_id == session_id,
+                            DailyAssignment.status == AssignmentStatus.PENDING,
+                        )
+                        .order_by(DailyAssignment.display_name, DailyAssignment.id)
+                    )
+                ).all()
+                if not assignments:
+                    return None
+
+                notification = DailyNotification(
+                    session_id=session_id,
+                    kind=kind,
+                    message_id=None,
+                    sent_at=None,
+                )
+                session.add(notification)
+                await session.flush()
+                return PreparedReminder(
+                    notification_id=notification.id,
+                    session_id=daily_session.id,
+                    project_name=project.name,
+                    channel_id=project.discord_channel_id,
+                    kind=kind,
+                    recipients=tuple(
+                        ReminderRecipient(
+                            user_id=assignment.discord_user_id,
+                            display_name=assignment.display_name,
+                        )
+                        for assignment in assignments
+                    ),
+                )
+        except IntegrityError:
+            return None
 
     async def _open_project(
         self, discord_guild_id: int, project_id: int, local_date: date
