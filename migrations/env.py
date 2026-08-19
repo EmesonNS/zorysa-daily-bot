@@ -4,12 +4,14 @@ import asyncio
 import os
 
 from alembic import context
-from sqlalchemy import MetaData, pool
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.infrastructure.database.models import Base
+
 config = context.config
-target_metadata = MetaData()
+target_metadata = Base.metadata
 
 
 def _database_url() -> str:
