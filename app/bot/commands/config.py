@@ -4,10 +4,46 @@ import discord
 from discord import app_commands
 
 from app.bot.commands.common import actor_from_interaction
-from app.bot.contracts import ApplicationError, GuildAdminPresentationService
+from app.bot.contracts import (
+    ApplicationError,
+    GuildAdminPresentationService,
+    SchedulePresentationService,
+    ScheduleSummary,
+)
+
+_WEEKDAYS = (
+    "Segunda-feira",
+    "Terça-feira",
+    "Quarta-feira",
+    "Quinta-feira",
+    "Sexta-feira",
+    "Sábado",
+    "Domingo",
+)
+_WEEKDAY_CHOICES = [
+    app_commands.Choice(name=name, value=value) for value, name in enumerate(_WEEKDAYS)
+]
 
 
-def build_config_group(service: GuildAdminPresentationService) -> app_commands.Group:
+def _format_schedule(schedule: ScheduleSummary) -> str:
+    status = "Ativa" if schedule.daily_enabled else "Desativada"
+    days = ", ".join(_WEEKDAYS[weekday] for weekday in schedule.execution_days)
+    opening, first, last, closing = schedule.formatted_times
+    return (
+        f"**Agenda automática:** {status}\n"
+        f"**Timezone:** `{schedule.timezone}`\n"
+        f"**Dias:** {days}\n"
+        f"**Abertura:** {opening}\n"
+        f"**Primeiro lembrete:** {first}\n"
+        f"**Último lembrete:** {last}\n"
+        f"**Fechamento:** {closing}"
+    )
+
+
+def build_config_group(
+    service: GuildAdminPresentationService,
+    schedule_service: SchedulePresentationService | None = None,
+) -> app_commands.Group:
     """Build `/config admin` commands using an injected application service."""
 
     config = app_commands.Group(name="config", description="Configurações do Zorysa Daily Bot")
@@ -62,13 +98,103 @@ def build_config_group(service: GuildAdminPresentationService) -> app_commands.G
         )
 
     config.add_command(admin)
+    if schedule_service is not None:
+        agenda = app_commands.Group(name="agenda", description="Agenda automática da daily")
+
+        @agenda.command(name="visualizar", description="Mostra a agenda automática atual")
+        async def view_schedule(interaction: discord.Interaction) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.get_schedule(
+                    actor=actor_from_interaction(interaction)
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        @agenda.command(name="horarios", description="Altera os quatro horários da agenda")
+        @app_commands.rename(
+            primeiro_lembrete="primeiro-lembrete",
+            ultimo_lembrete="ultimo-lembrete",
+        )
+        @app_commands.describe(
+            abertura="Horário de abertura em HH:MM",
+            primeiro_lembrete="Primeiro lembrete em HH:MM",
+            ultimo_lembrete="Último lembrete em HH:MM",
+            fechamento="Horário de fechamento em HH:MM",
+        )
+        async def update_times(
+            interaction: discord.Interaction,
+            abertura: str,
+            primeiro_lembrete: str,
+            ultimo_lembrete: str,
+            fechamento: str,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.update_times(
+                    actor=actor_from_interaction(interaction),
+                    opening=abertura,
+                    first_reminder=primeiro_lembrete,
+                    last_reminder=ultimo_lembrete,
+                    closing=fechamento,
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        @agenda.command(name="timezone", description="Altera o timezone IANA da agenda")
+        @app_commands.describe(valor="Timezone IANA, por exemplo America/Belem")
+        async def update_timezone(interaction: discord.Interaction, valor: str) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.update_timezone(
+                    actor=actor_from_interaction(interaction), timezone=valor
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        @agenda.command(name="dia-adicionar", description="Adiciona um dia à agenda")
+        @app_commands.choices(dia=_WEEKDAY_CHOICES)
+        async def add_day(interaction: discord.Interaction, dia: app_commands.Choice[int]) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.add_execution_day(
+                    actor=actor_from_interaction(interaction), weekday=dia.value
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        @agenda.command(name="dia-remover", description="Remove um dia da agenda")
+        @app_commands.choices(dia=_WEEKDAY_CHOICES)
+        async def remove_day(
+            interaction: discord.Interaction, dia: app_commands.Choice[int]
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.remove_execution_day(
+                    actor=actor_from_interaction(interaction), weekday=dia.value
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        config.add_command(agenda)
     return config
 
 
 def register_config_commands(
     tree: app_commands.CommandTree[discord.Client],
     service: GuildAdminPresentationService,
+    schedule_service: SchedulePresentationService,
 ) -> None:
     """Register the config group on a command tree."""
 
-    tree.add_command(build_config_group(service))
+    tree.add_command(build_config_group(service, schedule_service))

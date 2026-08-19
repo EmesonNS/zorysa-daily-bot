@@ -11,6 +11,7 @@ from app.bot.contracts import (
     DailyPresentationService,
     GuildAdminPresentationService,
     ProjectPresentationService,
+    SchedulePresentationService,
 )
 from app.bot.views.daily import DailyResponseView
 
@@ -24,6 +25,7 @@ class ZorysaBot(commands.Bot):
         app_name: str,
         guild_id: int | None = None,
         guild_admin_service: GuildAdminPresentationService | None = None,
+        schedule_service: SchedulePresentationService | None = None,
         project_service: ProjectPresentationService | None = None,
         daily_service: DailyPresentationService | None = None,
     ) -> None:
@@ -34,14 +36,15 @@ class ZorysaBot(commands.Bot):
         self._sync_guild = discord.Object(id=guild_id) if guild_id is not None else None
         self._daily_service = daily_service
         register_health_command(self, app_name=app_name)
-        services = (guild_admin_service, project_service, daily_service)
+        services = (guild_admin_service, schedule_service, project_service, daily_service)
         if any(service is not None for service in services):
             if any(service is None for service in services):
                 raise ValueError("All manual daily services must be provided together")
             assert guild_admin_service is not None
+            assert schedule_service is not None
             assert project_service is not None
             assert daily_service is not None
-            register_config_commands(self.tree, guild_admin_service)
+            register_config_commands(self.tree, guild_admin_service, schedule_service)
             register_project_commands(self.tree, project_service)
             register_daily_commands(self, daily_service, project_service)
 

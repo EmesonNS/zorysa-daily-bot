@@ -19,6 +19,7 @@ from app.application.dto import (
     AdminRoleSummary,
     MemberSummary,
     ProjectSummary,
+    ScheduleSummary,
 )
 from app.application.errors import ApplicationError
 
@@ -33,6 +34,30 @@ class GuildAdminPresentationService(Protocol):
     async def remove_admin_role(self, *, actor: ActorContext, role_id: int) -> None: ...
 
     async def list_admin_roles(self, *, actor: ActorContext) -> tuple[AdminRoleSummary, ...]: ...
+
+
+class SchedulePresentationService(Protocol):
+    """Application operations consumed by `/config agenda`."""
+
+    async def get_schedule(self, *, actor: ActorContext) -> ScheduleSummary: ...
+
+    async def update_times(
+        self,
+        *,
+        actor: ActorContext,
+        opening: str,
+        first_reminder: str,
+        last_reminder: str,
+        closing: str,
+    ) -> ScheduleSummary: ...
+
+    async def update_timezone(self, *, actor: ActorContext, timezone: str) -> ScheduleSummary: ...
+
+    async def add_execution_day(self, *, actor: ActorContext, weekday: int) -> ScheduleSummary: ...
+
+    async def remove_execution_day(
+        self, *, actor: ActorContext, weekday: int
+    ) -> ScheduleSummary: ...
 
 
 class ProjectPresentationService(Protocol):
@@ -91,4 +116,6 @@ __all__ = [
     "ProjectPresentationService",
     "ProjectSummary",
     "QuestionPrompt",
+    "SchedulePresentationService",
+    "ScheduleSummary",
 ]
