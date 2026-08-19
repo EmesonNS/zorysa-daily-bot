@@ -12,6 +12,7 @@ from app.infrastructure.database.models import (
     AdminRole,
     DailyQuestion,
     Guild,
+    GuildExecutionDay,
     GuildSettings,
 )
 
@@ -44,6 +45,7 @@ async def ensure_guild_record(
         DailyQuestion(text=text, position=position, required=True, active=True)
         for position, text in enumerate(DEFAULT_DAILY_QUESTIONS, start=1)
     ]
+    guild.execution_days = [GuildExecutionDay(weekday=weekday) for weekday in range(5)]
     session.add(guild)
     await session.flush()
     return guild
