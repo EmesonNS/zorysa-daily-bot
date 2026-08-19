@@ -20,7 +20,10 @@ def test_settings_load_required_values_and_safe_defaults() -> None:
     assert "super-secret-token" not in repr(settings)
 
 
-def test_settings_reject_missing_required_values() -> None:
+def test_settings_reject_missing_required_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISCORD_TOKEN", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
     with pytest.raises(ValidationError) as token_error:
         Settings(
             database_url="postgresql+asyncpg://user:password@db:5432/zorysa",
