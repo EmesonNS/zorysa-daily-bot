@@ -1,7 +1,7 @@
 """Manual daily session application service."""
 
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -65,86 +65,12 @@ class DailyService:
                     select(GuildSettings.timezone).where(GuildSettings.guild_id == guild.id)
                 )
                 local_date = self._now().astimezone(ZoneInfo(timezone or self._timezone)).date()
-                daily_session = await session.scalar(
-                    select(DailySession).where(
-                        DailySession.project_id == project.id,
-                        DailySession.session_date == local_date,
-                    )
-                )
-                if daily_session is not None:
-                    return OpenedDaily(
-                        panel=await self._panel(session, daily_session, project.name),
-                        channel_id=project.discord_channel_id,
-                        message_id=daily_session.message_id,
-                    )
-
-                memberships = (
-                    await session.scalars(
-                        select(ProjectMembership)
-                        .where(
-                            ProjectMembership.project_id == project.id,
-                            ProjectMembership.left_at.is_(None),
-                        )
-                        .order_by(ProjectMembership.display_name, ProjectMembership.id)
-                    )
-                ).all()
-                if not memberships:
-                    raise ValidationError(
-                        "Adicione ao menos um membro ativo antes de abrir a daily."
-                    )
-
-                questions = (
-                    await session.scalars(
-                        select(DailyQuestion)
-                        .where(DailyQuestion.guild_id == guild.id, DailyQuestion.active.is_(True))
-                        .order_by(DailyQuestion.position)
-                    )
-                ).all()
-                if not questions:
-                    raise ValidationError("Não há perguntas ativas para esta daily.")
-                if len(questions) > 5:
-                    raise ValidationError(
-                        "A daily possui mais de cinco perguntas e não cabe em um modal."
-                    )
-
-                daily_session = DailySession(
-                    project_id=project.id,
-                    session_date=local_date,
-                    status=SessionStatus.OPEN,
+                return await _open_project_session(
+                    session,
+                    guild=guild,
+                    project=project,
+                    local_date=local_date,
                     opened_at=self._now(),
-                    closed_at=None,
-                    message_id=None,
-                )
-                session.add(daily_session)
-                await session.flush()
-                session.add_all(
-                    [
-                        DailyAssignment(
-                            session_id=daily_session.id,
-                            discord_user_id=membership.discord_user_id,
-                            display_name=membership.display_name,
-                            status=AssignmentStatus.PENDING,
-                            answered_at=None,
-                        )
-                        for membership in memberships
-                    ]
-                )
-                session.add_all(
-                    [
-                        DailyQuestionSnapshot(
-                            session_id=daily_session.id,
-                            text=question.text,
-                            position=question.position,
-                            required=question.required,
-                        )
-                        for question in questions
-                    ]
-                )
-                await session.flush()
-                return OpenedDaily(
-                    panel=await self._panel(session, daily_session, project.name),
-                    channel_id=project.discord_channel_id,
-                    message_id=None,
                 )
         except IntegrityError as error:
             raise ConflictError(
@@ -321,3 +247,92 @@ class DailyService:
     def _now(self) -> datetime:
         value = self._clock()
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def _open_project_session(
+    session: AsyncSession,
+    *,
+    guild: Guild,
+    project: Project,
+    local_date: date,
+    opened_at: datetime,
+) -> OpenedDaily:
+    """Create or reuse one project session inside the caller's transaction."""
+
+    daily_session = await session.scalar(
+        select(DailySession).where(
+            DailySession.project_id == project.id,
+            DailySession.session_date == local_date,
+        )
+    )
+    if daily_session is not None:
+        return OpenedDaily(
+            panel=await DailyService._panel(session, daily_session, project.name),
+            channel_id=project.discord_channel_id,
+            message_id=daily_session.message_id,
+        )
+
+    memberships = (
+        await session.scalars(
+            select(ProjectMembership)
+            .where(
+                ProjectMembership.project_id == project.id,
+                ProjectMembership.left_at.is_(None),
+            )
+            .order_by(ProjectMembership.display_name, ProjectMembership.id)
+        )
+    ).all()
+    if not memberships:
+        raise ValidationError("Adicione ao menos um membro ativo antes de abrir a daily.")
+
+    questions = (
+        await session.scalars(
+            select(DailyQuestion)
+            .where(DailyQuestion.guild_id == guild.id, DailyQuestion.active.is_(True))
+            .order_by(DailyQuestion.position)
+        )
+    ).all()
+    if not questions:
+        raise ValidationError("Não há perguntas ativas para esta daily.")
+    if len(questions) > 5:
+        raise ValidationError("A daily possui mais de cinco perguntas e não cabe em um modal.")
+
+    daily_session = DailySession(
+        project_id=project.id,
+        session_date=local_date,
+        status=SessionStatus.OPEN,
+        opened_at=opened_at,
+        closed_at=None,
+        message_id=None,
+    )
+    session.add(daily_session)
+    await session.flush()
+    session.add_all(
+        [
+            DailyAssignment(
+                session_id=daily_session.id,
+                discord_user_id=membership.discord_user_id,
+                display_name=membership.display_name,
+                status=AssignmentStatus.PENDING,
+                answered_at=None,
+            )
+            for membership in memberships
+        ]
+    )
+    session.add_all(
+        [
+            DailyQuestionSnapshot(
+                session_id=daily_session.id,
+                text=question.text,
+                position=question.position,
+                required=question.required,
+            )
+            for question in questions
+        ]
+    )
+    await session.flush()
+    return OpenedDaily(
+        panel=await DailyService._panel(session, daily_session, project.name),
+        channel_id=project.discord_channel_id,
+        message_id=None,
+    )
