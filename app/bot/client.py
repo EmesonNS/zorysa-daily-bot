@@ -43,7 +43,7 @@ class ZorysaBot(commands.Bot):
             assert daily_service is not None
             register_config_commands(self.tree, guild_admin_service)
             register_project_commands(self.tree, project_service)
-            register_daily_commands(self, daily_service)
+            register_daily_commands(self, daily_service, project_service)
 
     async def setup_hook(self) -> None:
         """Synchronize commands globally or to the configured development guild."""

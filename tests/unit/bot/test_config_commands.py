@@ -67,8 +67,11 @@ async def test_list_admin_roles_formats_mentions() -> None:
     )
     interaction = _interaction()
 
-    await _admin_command(build_config_group(service), "roles").callback(interaction)
+    command = _admin_command(build_config_group(service), "roles")
+    assert command.description == "Lista os cargos com acesso administrativo"
+    await command.callback(interaction)
 
     content = interaction.edit_original_response.await_args.kwargs["content"]
+    assert "Cargos com acesso administrativo ao bot:" in content
     assert "<@&88>" in content
     assert "<@&99>" in content

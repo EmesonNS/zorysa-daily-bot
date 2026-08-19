@@ -25,6 +25,23 @@ def _open_command(group: app_commands.Group) -> app_commands.Command:
     return command
 
 
+def _project_service() -> MagicMock:
+    project_service = MagicMock()
+    project_service.list_projects = AsyncMock(
+        return_value=(
+            SimpleNamespace(
+                name="AmazHealth",
+                slug="amazhealth",
+                channel_id=55,
+                status="ACTIVE",
+                daily_enabled=True,
+                participant_count=2,
+            ),
+        )
+    )
+    return project_service
+
+
 async def test_open_daily_publishes_panel_and_attaches_message_id() -> None:
     service = MagicMock()
     service.open_daily = AsyncMock(
@@ -37,12 +54,18 @@ async def test_open_daily_publishes_panel_and_attaches_message_id() -> None:
     bot.get_channel.return_value = channel
     interaction = _interaction()
 
-    await _open_command(build_daily_group(bot, service)).callback(interaction, "amazhealth")
+    await _open_command(build_daily_group(bot, service, _project_service())).callback(
+        interaction, "amazhealth"
+    )
 
     channel.send.assert_awaited_once()
     kwargs = channel.send.await_args.kwargs
     assert kwargs["embed"].title == "Daily • AmazHealth"
     assert kwargs["view"].timeout is None
+    assert kwargs["content"] == "<@10> <@20>"
+    assert kwargs["allowed_mentions"].users is True
+    assert kwargs["allowed_mentions"].roles is False
+    assert kwargs["allowed_mentions"].everyone is False
     service.attach_message.assert_awaited_once_with(session_id=7, message_id=999)
     interaction.response.defer.assert_awaited_once_with(ephemeral=True)
 
@@ -56,9 +79,30 @@ async def test_open_daily_does_not_duplicate_existing_message() -> None:
     bot = MagicMock()
     interaction = _interaction()
 
-    await _open_command(build_daily_group(bot, service)).callback(interaction, "amazhealth")
+    await _open_command(build_daily_group(bot, service, _project_service())).callback(
+        interaction, "amazhealth"
+    )
 
     bot.get_channel.assert_not_called()
     service.attach_message.assert_not_awaited()
     content = interaction.edit_original_response.await_args.kwargs["content"]
     assert "já está aberta" in content
+
+
+async def test_open_daily_project_parameter_has_autocomplete() -> None:
+    service = MagicMock()
+    project_service = _project_service()
+    bot = MagicMock()
+    interaction = _interaction()
+    autocomplete = (
+        _open_command(build_daily_group(bot, service, project_service))
+        ._params["projeto"]
+        .autocomplete
+    )
+    assert autocomplete is not None
+
+    choices = await autocomplete(interaction, "health")
+
+    assert [(choice.name, choice.value) for choice in choices] == [
+        ("AmazHealth (amazhealth)", "amazhealth")
+    ]

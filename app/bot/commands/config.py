@@ -45,7 +45,7 @@ def build_config_group(service: GuildAdminPresentationService) -> app_commands.G
             content=f"Cargo administrativo removido: {cargo.name}."
         )
 
-    @admin.command(name="roles", description="Lista os cargos administrativos")
+    @admin.command(name="roles", description="Lista os cargos com acesso administrativo")
     async def list_roles(interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
@@ -55,6 +55,8 @@ def build_config_group(service: GuildAdminPresentationService) -> app_commands.G
             return
 
         content = "\n".join(f"• <@&{role.role_id}>" for role in roles)
+        if content:
+            content = f"Cargos com acesso administrativo ao bot:\n{content}"
         await interaction.edit_original_response(
             content=content or "Nenhum cargo administrativo configurado."
         )

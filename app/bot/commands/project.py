@@ -3,7 +3,7 @@
 import discord
 from discord import app_commands
 
-from app.bot.commands.common import actor_from_interaction
+from app.bot.commands.common import actor_from_interaction, autocomplete_projects
 from app.bot.contracts import ApplicationError, ProjectPresentationService
 
 
@@ -33,7 +33,7 @@ def build_project_group(service: ProjectPresentationService) -> app_commands.Gro
             content=f"Projeto `{created.slug}` criado em {canal.mention}."
         )
 
-    @project.command(name="listar", description="Lista os projetos")
+    @project.command(name="listar", description="Lista projetos e canais associados")
     async def list_projects(interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
@@ -46,7 +46,7 @@ def build_project_group(service: ProjectPresentationService) -> app_commands.Gro
             (
                 f"• **{item.name}** (`{item.slug}`) — {item.status} — "
                 f"daily {'habilitada' if item.daily_enabled else 'desabilitada'} — "
-                f"{item.participant_count} participante(s) — <#{item.channel_id}>"
+                f"{item.participant_count} participante(s) — Canal: <#{item.channel_id}>"
             )
             for item in projects
         ]
@@ -114,6 +114,16 @@ def build_project_group(service: ProjectPresentationService) -> app_commands.Gro
         await interaction.edit_original_response(
             content="\n".join(lines) or f"O projeto `{projeto}` não possui membros ativos."
         )
+
+    async def project_autocomplete(
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        return await autocomplete_projects(interaction, current, service)
+
+    add_member.autocomplete("projeto")(project_autocomplete)
+    remove_member.autocomplete("projeto")(project_autocomplete)
+    list_members.autocomplete("projeto")(project_autocomplete)
 
     return project
 
