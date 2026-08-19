@@ -5,6 +5,7 @@ requires-python = ">=3.12,<3.13"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.ruff]
