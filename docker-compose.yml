@@ -22,6 +22,7 @@ services:
     environment:
       APP_NAME: ${APP_NAME:-Zorysa Daily Bot}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
       DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN is required}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

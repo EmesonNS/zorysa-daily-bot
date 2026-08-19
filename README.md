@@ -61,10 +61,27 @@ No Discord Developer Portal:
    privilegiados (`Presence`, `Server Members` e `Message Content`). O bot usa apenas o intent
    de guilds.
 2. Em **OAuth2 > URL Generator**, selecione os escopos `bot` e `applications.commands`.
-3. Nas permissões do bot, selecione `View Channels` e `Send Messages`, gere o convite e adicione
-   o bot ao servidor desejado.
+3. Nas permissões do bot, selecione `View Channels`, `Send Messages` e `Embed Links`, gere o
+   convite e adicione o bot ao servidor desejado.
 
 Após conectar, use `/health` para verificar o nome do bot, a latência e a guild atual.
+
+## Daily manual
+
+O primeiro cargo administrativo deve ser cadastrado pelo dono do servidor ou por alguém com
+`Gerenciar Servidor`. Depois disso, somente os cargos cadastrados administram o bot:
+
+1. `/config admin role-adicionar cargo:@Administradores`
+2. `/projeto criar nome:AmazHealth canal:#daily-amazhealth`
+3. `/projeto membro-adicionar projeto:amazhealth usuario:@Pessoa`
+4. `/daily abrir projeto:amazhealth`
+
+Use `/projeto listar`, `/projeto membros` e `/config admin roles` para consultar a configuração.
+Participantes respondem pelo botão **Responder daily** e pelo modal privado. A mensagem pública
+mostra apenas quem respondeu; o conteúdo das respostas permanece no banco.
+
+Se `DISCORD_GUILD_ID` estiver configurado, reinicie o container para sincronizar os novos comandos
+imediatamente nessa guild. Sem essa variável, a sincronização é global e pode levar mais tempo.
 
 ## Gate de qualidade
 

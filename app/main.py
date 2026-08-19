@@ -6,6 +6,9 @@ import logging
 import discord
 from pydantic import ValidationError
 
+from app.application.daily import DailyService
+from app.application.guild_admin import GuildAdminService
+from app.application.projects import ProjectService
 from app.bot.client import ZorysaBot
 from app.infrastructure.database import Database, DatabaseUnavailableError
 from app.logging import configure_logging
@@ -22,7 +25,13 @@ async def run(settings: Settings) -> None:
         await database.check_readiness()
         logger.info("Database readiness check passed")
 
-        bot = ZorysaBot(app_name=settings.app_name, guild_id=settings.discord_guild_id)
+        bot = ZorysaBot(
+            app_name=settings.app_name,
+            guild_id=settings.discord_guild_id,
+            guild_admin_service=GuildAdminService(database.sessions, timezone=settings.timezone),
+            project_service=ProjectService(database.sessions, timezone=settings.timezone),
+            daily_service=DailyService(database.sessions, timezone=settings.timezone),
+        )
         try:
             logger.info("Starting %s", settings.app_name)
             await bot.start(settings.discord_token.get_secret_value(), reconnect=True)
