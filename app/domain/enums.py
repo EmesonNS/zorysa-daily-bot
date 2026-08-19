@@ -23,3 +23,11 @@ class AssignmentStatus(StrEnum):
     PENDING = "PENDING"
     ANSWERED = "ANSWERED"
     ABSENT = "ABSENT"
+    NOT_ANSWERED = "NOT_ANSWERED"
+
+
+class NotificationKind(StrEnum):
+    """Reminder stage sent for a daily session."""
+
+    FIRST_REMINDER = "FIRST_REMINDER"
+    LAST_REMINDER = "LAST_REMINDER"

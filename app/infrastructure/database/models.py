@@ -1,6 +1,6 @@
 """SQLAlchemy mappings for guild configuration and manual daily sessions."""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Annotated
 
 from sqlalchemy import (
@@ -14,8 +14,10 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    SmallInteger,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
 )
@@ -24,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.domain.enums import AssignmentStatus, ProjectStatus, SessionStatus
+from app.domain.enums import AssignmentStatus, NotificationKind, ProjectStatus, SessionStatus
 
 
 class Base(DeclarativeBase):
@@ -82,6 +84,9 @@ class Guild(TimestampMixin, Base):
     projects: Mapped[list["Project"]] = relationship(
         back_populates="guild", cascade="all, delete-orphan"
     )
+    execution_days: Mapped[list["GuildExecutionDay"]] = relationship(
+        back_populates="guild", cascade="all, delete-orphan"
+    )
 
 
 class GuildSettings(TimestampMixin, Base):
@@ -95,8 +100,37 @@ class GuildSettings(TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, server_default=sql_text("'America/Belem'")
     )
+    daily_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("true")
+    )
+    daily_open_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'09:00:00'")
+    )
+    first_reminder_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'10:30:00'")
+    )
+    last_reminder_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'11:30:00'")
+    )
+    daily_close_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'12:00:00'")
+    )
 
     guild: Mapped[Guild] = relationship(back_populates="settings")
+
+
+class GuildExecutionDay(Base):
+    """Weekday on which one guild runs automatic dailies."""
+
+    __tablename__ = "guild_execution_days"
+    __table_args__ = (CheckConstraint("weekday >= 0 AND weekday <= 6", name="valid_weekday"),)
+
+    guild_id: Mapped[int] = mapped_column(
+        ForeignKey("guilds.id", ondelete="CASCADE"), primary_key=True
+    )
+    weekday: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+
+    guild: Mapped[Guild] = relationship(back_populates="execution_days")
 
 
 class AdminRole(TimestampMixin, Base):
@@ -230,6 +264,35 @@ class DailySession(TimestampMixin, Base):
     question_snapshots: Mapped[list["DailyQuestionSnapshot"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    notifications: Mapped[list["DailyNotification"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class DailyNotification(TimestampMixin, Base):
+    """Persisted delivery marker for an idempotent daily reminder."""
+
+    __tablename__ = "daily_notifications"
+    __table_args__ = (
+        UniqueConstraint("session_id", "kind", name="uq_daily_notifications_session_kind"),
+    )
+
+    id: Mapped[PrimaryKey]
+    session_id: Mapped[int] = mapped_column(ForeignKey("daily_sessions.id", ondelete="CASCADE"))
+    kind: Mapped[NotificationKind] = mapped_column(
+        Enum(
+            NotificationKind,
+            name="kind",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
+    message_id: Mapped[int | None] = mapped_column(BigInteger)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    session: Mapped[DailySession] = relationship(back_populates="notifications")
 
 
 class DailyAssignment(TimestampMixin, Base):
