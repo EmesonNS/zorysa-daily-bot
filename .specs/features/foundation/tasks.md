@@ -1,7 +1,7 @@
 # Foundation Tasks
 
 **Design:** `.specs/features/foundation/design.md`
-**Status:** In Progress
+**Status:** Done
 
 ## Execution Plan
 
@@ -12,6 +12,7 @@ T1 → T2 ─┬→ T3 ─┐
 ```
 
 ### T1: Criar scaffold e tooling
+**Status:** Complete
 
 **What:** Criar pacotes, dependências e configuração de pytest, Ruff e mypy.
 **Where:** `app/`, `tests/`, `requirements*.txt`, `pyproject.toml`, `.gitignore`
@@ -25,6 +26,7 @@ T1 → T2 ─┬→ T3 ─┐
 **Commit:** `build(foundation): scaffold python application`
 
 ### T2: Implementar configuração e logging
+**Status:** Complete
 
 **What:** Carregar e validar ambiente com segredos ocultos e logging seguro.
 **Where:** `app/settings.py`, `app/logging.py`, `tests/unit/test_settings.py`
@@ -38,6 +40,7 @@ T1 → T2 ─┬→ T3 ─┐
 **Commit:** `feat(config): add validated environment settings`
 
 ### T3: Implementar cliente Discord [P]
+**Status:** Complete
 
 **What:** Criar o bot, sincronização e Slash Command `/health` testável sem rede.
 **Where:** `app/bot/client.py`, `app/bot/commands/health.py`, `tests/unit/bot/`
@@ -51,6 +54,7 @@ T1 → T2 ─┬→ T3 ─┐
 **Commit:** `feat(discord): add bot client and health command`
 
 ### T4: Implementar infraestrutura de banco [P]
+**Status:** Complete
 
 **What:** Criar engine, sessões e readiness assíncrono com erro controlado.
 **Where:** `app/infrastructure/database/`, `tests/unit/infrastructure/test_database.py`
@@ -64,6 +68,7 @@ T1 → T2 ─┬→ T3 ─┐
 **Commit:** `feat(database): add async sqlalchemy infrastructure`
 
 ### T5: Configurar Alembic e migration base
+**Status:** Complete
 
 **What:** Criar ambiente Alembic e uma revisão base reproduzível e idempotente.
 **Where:** `alembic.ini`, `migrations/`, `tests/integration/test_migrations.py`
@@ -77,6 +82,7 @@ T1 → T2 ─┬→ T3 ─┐
 **Commit:** `feat(database): add baseline alembic migration`
 
 ### T6: Containerizar e documentar
+**Status:** Complete
 
 **What:** Orquestrar bot e banco e documentar instalação, ambiente e permissões.
 **Where:** `Dockerfile`, `docker-compose.yml`, `.env.example`, `README.md`, `app/main.py`

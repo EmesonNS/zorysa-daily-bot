@@ -1,7 +1,7 @@
 # State
 
 **Last Updated:** 2026-08-19
-**Current Work:** M0 — Fundação técnica
+**Current Work:** M0 concluído; M1 aguardando especificação executável
 
 ## Recent Decisions (Last 60 days)
 
@@ -33,6 +33,7 @@
 ## Lessons Learned
 
 - O wrapper de apply_patch apresentou falha temporária do sandbox no início do projeto; alterações posteriores voltaram a funcionar.
+- Testes de configuração precisam remover explicitamente variáveis do ambiente durante gates de integração.
 
 ## Deferred Ideas
 
@@ -40,7 +41,7 @@
 
 ## Todos
 
-- [ ] Concluir as tarefas da fundação técnica.
+- [ ] Planejar e implementar M1 — Daily manual completa.
 
 ## Preferences
 

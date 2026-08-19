@@ -6,10 +6,10 @@ O projeto possui requisitos funcionais completos, mas ainda não tem aplicação
 
 ## Goals
 
-- [ ] Executar um único ponto de entrada Python localmente e em Docker.
-- [ ] Validar configuração antes de conectar a serviços externos.
-- [ ] Registrar um Slash Command de diagnóstico sem expor segredos.
-- [ ] Criar e versionar o banco por migrations reproduzíveis.
+- [x] Executar um único ponto de entrada Python localmente e em Docker.
+- [x] Validar configuração antes de conectar a serviços externos.
+- [x] Registrar um Slash Command de diagnóstico sem expor segredos.
+- [x] Criar e versionar o banco por migrations reproduzíveis.
 
 ## Out of Scope
 
@@ -59,12 +59,12 @@ WHEN o gate de build executar THEN lint, formato, tipos e testes SHALL passar; o
 
 | Requirement | Backlog | Status |
 |---|---|---|
-| FND-01 | US-001 | In Tasks |
-| FND-02 | US-002, US-003, US-059 | In Tasks |
-| FND-03 | US-002 | In Tasks |
-| FND-04 | US-003 | In Tasks |
-| FND-05 | US-004 | In Tasks |
-| FND-06 | US-005 | In Tasks |
-| FND-07 | US-006, US-056, US-057, US-060, US-061 | In Tasks |
+| FND-01 | US-001 | Verified |
+| FND-02 | US-002, US-003, US-059 | Verified |
+| FND-03 | US-002 | Verified |
+| FND-04 | US-003 | Verified |
+| FND-05 | US-004 | Verified |
+| FND-06 | US-005 | Verified |
+| FND-07 | US-006, US-056, US-057, US-060, US-061 | Verified |
 
 **Coverage:** 7 total, 7 mapped, 0 unmapped.

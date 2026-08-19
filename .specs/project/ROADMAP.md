@@ -1,17 +1,17 @@
 # Roadmap
 
-**Current Milestone:** M0 — Fundação técnica
-**Status:** In Progress
+**Current Milestone:** M1 — Daily manual completa
+**Status:** Planning
 
 ## M0 — Fundação técnica
 
 **Goal:** Executar o bot em containers, conectado ao Discord e PostgreSQL, com migrations e observabilidade.
 
-- Estrutura modular e tooling — IN PROGRESS
-- Configuração e logging — PLANNED
-- Conexão Discord e Slash Command de diagnóstico — PLANNED
-- PostgreSQL, SQLAlchemy e Alembic — PLANNED
-- Docker Compose e documentação de setup — PLANNED
+- Estrutura modular e tooling — COMPLETE
+- Configuração e logging — COMPLETE
+- Conexão Discord e Slash Command de diagnóstico — COMPLETE
+- PostgreSQL, SQLAlchemy e Alembic — COMPLETE
+- Docker Compose e documentação de setup — COMPLETE
 
 ## M1 — Daily manual completa
 
