@@ -25,6 +25,7 @@ def _schedule(
         first_reminder=time(10, 30),
         last_reminder=time(11, 30),
         closing=time(12, 0),
+        reporting=time(12, 10),
     )
 
 

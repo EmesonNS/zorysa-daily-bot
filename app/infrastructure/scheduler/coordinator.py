@@ -155,6 +155,7 @@ class DatabaseScheduleSource:
                     GuildSettings.first_reminder_time,
                     GuildSettings.last_reminder_time,
                     GuildSettings.daily_close_time,
+                    GuildSettings.daily_report_time,
                 )
                 .join(GuildSettings, GuildSettings.guild_id == Guild.id)
                 .order_by(Guild.discord_guild_id)
@@ -184,6 +185,7 @@ class DatabaseScheduleSource:
                             first_reminder=row.first_reminder_time,
                             last_reminder=row.last_reminder_time,
                             closing=row.daily_close_time,
+                            reporting=row.daily_report_time,
                         ),
                     )
                 )

@@ -47,6 +47,7 @@ def _schedule() -> ScheduleSummary:
         first_reminder=time(10, 30),
         last_reminder=time(11, 30),
         closing=time(12),
+        reporting=time(12, 10),
     )
 
 
@@ -113,6 +114,7 @@ async def test_view_schedule_formats_days_times_and_timezone_ephemerally() -> No
     assert "America/Belem" in content
     assert "Segunda" in content and "Sexta" in content
     assert "09:00" in content and "12:00" in content
+    assert "**Relatório:** 12:10" in content
 
 
 async def test_update_schedule_times_passes_all_values() -> None:
@@ -122,7 +124,7 @@ async def test_update_schedule_times_passes_all_values() -> None:
     interaction = _interaction()
 
     command = _agenda_command(build_config_group(admin_service, schedule_service), "horarios")
-    await command.callback(interaction, "08:00", "09:00", "10:00", "11:00")
+    await command.callback(interaction, "08:00", "09:00", "10:00", "11:00", "11:10")
 
     assert schedule_service.update_times.await_args.kwargs == {
         "actor": schedule_service.update_times.await_args.kwargs["actor"],
@@ -130,7 +132,14 @@ async def test_update_schedule_times_passes_all_values() -> None:
         "first_reminder": "09:00",
         "last_reminder": "10:00",
         "closing": "11:00",
+        "reporting": "11:10",
     }
+
+
+def test_update_schedule_command_declares_report_parameter() -> None:
+    command = _agenda_command(build_config_group(MagicMock(), MagicMock()), "horarios")
+
+    assert [parameter.name for parameter in command.parameters][-1] == "relatorio"
 
 
 async def test_schedule_day_commands_use_discord_choices() -> None:

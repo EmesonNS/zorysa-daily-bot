@@ -1,10 +1,11 @@
 import os
+from datetime import time
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.application.dto import ActorContext
-from app.application.errors import AuthorizationError, ConflictError
+from app.application.errors import AuthorizationError, ConflictError, ValidationError
 from app.application.guild_admin import GuildAdminService
 from app.application.schedule import ScheduleService
 
@@ -55,7 +56,7 @@ async def test_schedule_defaults_updates_and_reloads_after_success(schedule_cont
     initial = await service.get_schedule(actor=actor)
     assert initial.timezone == "America/Belem"
     assert initial.execution_days == (0, 1, 2, 3, 4)
-    assert initial.formatted_times == ("09:00", "10:30", "11:30", "12:00")
+    assert initial.formatted_times == ("09:00", "10:30", "11:30", "12:00", "12:10")
 
     changed = await service.update_times(
         actor=actor,
@@ -63,8 +64,9 @@ async def test_schedule_defaults_updates_and_reloads_after_success(schedule_cont
         first_reminder="09:45",
         last_reminder="10:30",
         closing="11:00",
+        reporting="11:10",
     )
-    assert changed.formatted_times == ("08:15", "09:45", "10:30", "11:00")
+    assert changed.formatted_times == ("08:15", "09:45", "10:30", "11:00", "11:10")
     assert reloader.guild_ids == [actor.guild_id]
 
     changed = await service.update_timezone(actor=actor, timezone="America/Sao_Paulo")
@@ -99,3 +101,43 @@ async def test_schedule_requires_configured_admin_role(schedule_context) -> None
 
     with pytest.raises(AuthorizationError):
         await service.get_schedule(actor=_actor(owner=True))
+
+
+async def test_report_time_persists_across_service_instances(schedule_context) -> None:  # type: ignore[no-untyped-def]
+    admin = GuildAdminService(schedule_context)
+    await admin.add_admin_role(actor=_actor(owner=True), role_id=10)
+    actor = _actor(roles=(10,))
+
+    await ScheduleService(schedule_context).update_times(
+        actor=actor,
+        opening="08:00",
+        first_reminder="09:00",
+        last_reminder="10:00",
+        closing="11:00",
+        reporting="11:45",
+    )
+
+    assert (await ScheduleService(schedule_context).get_schedule(actor=actor)).reporting == time(
+        11, 45
+    )
+
+
+async def test_invalid_report_order_does_not_reload_or_change_schedule(schedule_context) -> None:  # type: ignore[no-untyped-def]
+    admin = GuildAdminService(schedule_context)
+    await admin.add_admin_role(actor=_actor(owner=True), role_id=10)
+    actor = _actor(roles=(10,))
+    reloader = RecordingReloader()
+    service = ScheduleService(schedule_context, reloader=reloader)
+
+    with pytest.raises(ValidationError):
+        await service.update_times(
+            actor=actor,
+            opening="09:00",
+            first_reminder="10:30",
+            last_reminder="11:30",
+            closing="12:00",
+            reporting="11:50",
+        )
+
+    assert (await service.get_schedule(actor=actor)).reporting == time(12, 10)
+    assert reloader.guild_ids == []

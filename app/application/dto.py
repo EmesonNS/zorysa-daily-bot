@@ -45,12 +45,14 @@ class ScheduleSummary:
     first_reminder: time
     last_reminder: time
     closing: time
+    reporting: time
 
     @property
-    def formatted_times(self) -> tuple[str, str, str, str]:
+    def formatted_times(self) -> tuple[str, str, str, str, str]:
         return (
             self.opening.strftime("%H:%M"),
             self.first_reminder.strftime("%H:%M"),
             self.last_reminder.strftime("%H:%M"),
             self.closing.strftime("%H:%M"),
+            self.reporting.strftime("%H:%M"),
         )

@@ -2,7 +2,7 @@ from datetime import time
 
 import pytest
 
-from app.application.dto import ActorContext
+from app.application.dto import ActorContext, ScheduleSummary
 from app.application.errors import ValidationError
 from app.application.schedule import ScheduleService
 
@@ -19,16 +19,18 @@ def _actor() -> ActorContext:
 
 
 @pytest.mark.parametrize(
-    ("opening", "first", "last", "closing"),
+    ("opening", "first", "last", "closing", "reporting"),
     [
-        ("9:00", "10:30", "11:30", "12:00"),
-        ("09:00", "08:30", "11:30", "12:00"),
-        ("09:00", "10:30", "10:30", "12:00"),
-        ("09:00", "10:30", "13:00", "12:00"),
+        ("9:00", "10:30", "11:30", "12:00", "12:10"),
+        ("09:00", "08:30", "11:30", "12:00", "12:10"),
+        ("09:00", "10:30", "10:30", "12:00", "12:10"),
+        ("09:00", "10:30", "13:00", "12:00", "12:10"),
+        ("09:00", "10:30", "11:30", "12:00", "12:00"),
+        ("09:00", "10:30", "11:30", "12:00", "12:0"),
     ],
 )
 async def test_schedule_rejects_invalid_format_or_order_before_database_access(
-    opening: str, first: str, last: str, closing: str
+    opening: str, first: str, last: str, closing: str, reporting: str
 ) -> None:
     service = ScheduleService(None)  # type: ignore[arg-type]
 
@@ -39,6 +41,7 @@ async def test_schedule_rejects_invalid_format_or_order_before_database_access(
             first_reminder=first,
             last_reminder=last,
             closing=closing,
+            reporting=reporting,
         )
 
 
@@ -58,3 +61,18 @@ async def test_schedule_rejects_weekday_outside_iso_range() -> None:
 
 def test_schedule_dto_keeps_time_values_without_seconds_or_timezone() -> None:
     assert time.fromisoformat("09:00").strftime("%H:%M") == "09:00"
+
+
+def test_schedule_summary_formats_all_five_stages() -> None:
+    schedule = ScheduleSummary(
+        timezone="America/Belem",
+        daily_enabled=True,
+        execution_days=(0,),
+        opening=time(9),
+        first_reminder=time(10, 30),
+        last_reminder=time(11, 30),
+        closing=time(12),
+        reporting=time(12, 10),
+    )
+
+    assert schedule.formatted_times == ("09:00", "10:30", "11:30", "12:00", "12:10")

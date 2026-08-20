@@ -28,7 +28,7 @@ _WEEKDAY_CHOICES = [
 def _format_schedule(schedule: ScheduleSummary) -> str:
     status = "Ativa" if schedule.daily_enabled else "Desativada"
     days = ", ".join(_WEEKDAYS[weekday] for weekday in schedule.execution_days)
-    opening, first, last, closing = schedule.formatted_times
+    opening, first, last, closing, reporting = schedule.formatted_times
     return (
         f"**Agenda automática:** {status}\n"
         f"**Timezone:** `{schedule.timezone}`\n"
@@ -36,7 +36,8 @@ def _format_schedule(schedule: ScheduleSummary) -> str:
         f"**Abertura:** {opening}\n"
         f"**Primeiro lembrete:** {first}\n"
         f"**Último lembrete:** {last}\n"
-        f"**Fechamento:** {closing}"
+        f"**Fechamento:** {closing}\n"
+        f"**Relatório:** {reporting}"
     )
 
 
@@ -113,7 +114,7 @@ def build_config_group(
                 return
             await interaction.edit_original_response(content=_format_schedule(schedule))
 
-        @agenda.command(name="horarios", description="Altera os quatro horários da agenda")
+        @agenda.command(name="horarios", description="Altera os cinco horários da agenda")
         @app_commands.rename(
             primeiro_lembrete="primeiro-lembrete",
             ultimo_lembrete="ultimo-lembrete",
@@ -123,6 +124,7 @@ def build_config_group(
             primeiro_lembrete="Primeiro lembrete em HH:MM",
             ultimo_lembrete="Último lembrete em HH:MM",
             fechamento="Horário de fechamento em HH:MM",
+            relatorio="Horário do relatório diário em HH:MM",
         )
         async def update_times(
             interaction: discord.Interaction,
@@ -130,6 +132,7 @@ def build_config_group(
             primeiro_lembrete: str,
             ultimo_lembrete: str,
             fechamento: str,
+            relatorio: str,
         ) -> None:
             await interaction.response.defer(ephemeral=True)
             try:
@@ -139,6 +142,7 @@ def build_config_group(
                     first_reminder=primeiro_lembrete,
                     last_reminder=ultimo_lembrete,
                     closing=fechamento,
+                    reporting=relatorio,
                 )
             except (ApplicationError, ValueError) as error:
                 await interaction.edit_original_response(content=str(error))

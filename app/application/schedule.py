@@ -59,16 +59,18 @@ class ScheduleService:
         first_reminder: str,
         last_reminder: str,
         closing: str,
+        reporting: str,
     ) -> ScheduleSummary:
         """Change all stages atomically after validating their strict order."""
 
         parsed = tuple(
-            self._parse_time(value) for value in (opening, first_reminder, last_reminder, closing)
+            self._parse_time(value)
+            for value in (opening, first_reminder, last_reminder, closing, reporting)
         )
-        if not parsed[0] < parsed[1] < parsed[2] < parsed[3]:
+        if not parsed[0] < parsed[1] < parsed[2] < parsed[3] < parsed[4]:
             raise ValidationError(
                 "Os horários devem seguir abertura < primeiro lembrete < "
-                "último lembrete < fechamento."
+                "último lembrete < fechamento < relatório."
             )
 
         async with self._sessions() as session, session.begin():
@@ -78,6 +80,7 @@ class ScheduleService:
                 settings.first_reminder_time,
                 settings.last_reminder_time,
                 settings.daily_close_time,
+                settings.daily_report_time,
             ) = parsed
             result = self._summary(settings, days)
             discord_guild_id = guild.discord_guild_id
@@ -188,4 +191,5 @@ class ScheduleService:
             first_reminder=settings.first_reminder_time,
             last_reminder=settings.last_reminder_time,
             closing=settings.daily_close_time,
+            reporting=settings.daily_report_time,
         )

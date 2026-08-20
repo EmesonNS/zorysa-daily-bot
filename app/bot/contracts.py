@@ -50,6 +50,7 @@ class SchedulePresentationService(Protocol):
         first_reminder: str,
         last_reminder: str,
         closing: str,
+        reporting: str,
     ) -> ScheduleSummary: ...
 
     async def update_timezone(self, *, actor: ActorContext, timezone: str) -> ScheduleSummary: ...
