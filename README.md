@@ -80,19 +80,31 @@ Use `/projeto listar`, `/projeto membros` e `/config admin roles` para consultar
 Participantes respondem pelo botão **Responder daily** e pelo modal privado. A mensagem pública
 mostra apenas quem respondeu; o conteúdo das respostas permanece no banco.
 
+As perguntas são administradas sem alterar o código:
+
+- `/config perguntas listar`
+- `/config perguntas adicionar texto obrigatoria`
+- `/config perguntas editar pergunta texto obrigatoria`
+- `/config perguntas mover pergunta posicao`
+- `/config perguntas ativar pergunta`
+- `/config perguntas desativar pergunta`
+
+IDs de perguntas e projetos possuem autocomplete. A configuração aceita entre uma e cinco
+perguntas ativas; sessões já abertas preservam seus snapshots.
+
 Se `DISCORD_GUILD_ID` estiver configurado, reinicie o container para sincronizar os novos comandos
 imediatamente nessa guild. Sem essa variável, a sincronização é global e pode levar mais tempo.
 
 ## Daily automática
 
 Cada servidor possui uma agenda própria. Os defaults são segunda a sexta no timezone
-`America/Belem`: abertura às `09:00`, primeiro lembrete às `10:30`, último lembrete às `11:30`
-e fechamento às `12:00`.
+`America/Belem`: abertura às `09:00`, primeiro lembrete às `10:30`, último lembrete às `11:30`,
+fechamento às `12:00` e relatório diário às `12:10`.
 
 Os comandos administrativos são:
 
 - `/config agenda visualizar`
-- `/config agenda horarios abertura primeiro-lembrete ultimo-lembrete fechamento`
+- `/config agenda horarios abertura primeiro-lembrete ultimo-lembrete fechamento relatorio`
 - `/config agenda timezone valor`
 - `/config agenda dia-adicionar dia`
 - `/config agenda dia-remover dia`
@@ -103,6 +115,17 @@ ainda não respondeu. No fechamento, pendentes passam para `NOT_ANSWERED`, o bot
 painel mostra ✅ para quem respondeu e ❌ para quem não respondeu; respostas privadas nunca são
 publicadas.
 
+Administradores podem registrar ausência com
+`/daily justificar projeto membro motivo data`. A data é opcional (`AAAA-MM-DD`); sem ela, o bot
+usa a data local do servidor. O painel mostra 🏖️, mas o motivo permanece privado no banco.
+
+Destinos gerenciais são configurados por `/config relatorios canais`,
+`/config relatorios canal-salvar` e `/config relatorios canal-remover`. Um canal pode ser marcado
+para relatórios diários, semanais e mensais; nesta etapa somente o relatório diário é agendado.
+O relatório apresenta métricas, estados e respostas completas, pagina automaticamente dentro dos
+limites do Discord e desabilita todas as menções. Reservations persistidas e nonces determinísticos
+evitam uma segunda publicação lógica em retries. Uma falha em um canal não impede os demais.
+
 Se o bot reconectar entre abertura e fechamento, ele cria sessões que estiverem faltando e segue
 somente com as próximas etapas. Lembretes vencidos não são repetidos. Sessões abertas cujo prazo
 já passou são encerradas imediatamente, inclusive se forem de um dia anterior.
@@ -111,12 +134,14 @@ já passou são encerradas imediatamente, inclusive se forem de um dia anterior.
 
 1. Confirme `/health`, um cargo administrativo, um projeto, seu canal e ao menos um participante.
 2. Use `/config agenda visualizar` e confirme timezone e dia atual.
-3. Em `/config agenda horarios`, informe quatro horários futuros separados por poucos minutos,
-   sempre na ordem estrita abertura < primeiro lembrete < último lembrete < fechamento.
-4. Observe a abertura com menções, responda com um participante e confirme que ele não aparece
-   nos lembretes seguintes.
-5. No fechamento, confirme o painel ✅/❌ e que o botão **Responder daily** desapareceu.
-6. Restaure os horários padrão com `09:00`, `10:30`, `11:30` e `12:00`.
+3. Configure duas perguntas de teste e dois canais com relatório diário habilitado.
+4. Em `/config agenda horarios`, informe cinco horários futuros separados por poucos minutos,
+   sempre na ordem abertura < primeiro lembrete < último lembrete < fechamento < relatório.
+5. Observe a abertura; faça um participante responder, justifique outro com `/daily justificar` e
+   deixe um terceiro sem resposta. Confirme ✅, 🏖️ e ❌ no painel após o fechamento.
+6. Confirme que os dois canais recebem o relatório paginado uma única vez, com métricas corretas,
+   respostas completas e nenhuma notificação por menção.
+7. Restaure os defaults `09:00`, `10:30`, `11:30`, `12:00` e `12:10`, além das perguntas e canais.
 
 Faça esse teste apenas em uma guild e canal de desenvolvimento. O bot real usa o relógio e o
 timezone configurados; não é necessário expor token, URL do banco ou qualquer resposta privada.

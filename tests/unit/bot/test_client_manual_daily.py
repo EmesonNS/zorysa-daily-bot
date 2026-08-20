@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
+from discord import app_commands
+
 from app.bot.client import ZorysaBot
 from app.bot.views.daily import DailyResponseView
 
@@ -24,6 +26,23 @@ def test_manual_daily_command_groups_are_registered_together() -> None:
     assert bot.tree.get_command("projeto") is not None
     assert bot.tree.get_command("daily") is not None
     assert bot.tree.get_command("health") is not None
+
+
+def test_config_registers_all_management_subgroups() -> None:
+    config = _bot().tree.get_command("config")
+    assert isinstance(config, app_commands.Group)
+    assert {command.name for command in config.commands} == {
+        "admin",
+        "agenda",
+        "perguntas",
+        "relatorios",
+    }
+
+
+def test_daily_registers_open_and_justified_absence_commands() -> None:
+    daily = _bot().tree.get_command("daily")
+    assert isinstance(daily, app_commands.Group)
+    assert {command.name for command in daily.commands} == {"abrir", "justificar"}
 
 
 def test_partial_manual_daily_dependencies_are_rejected() -> None:

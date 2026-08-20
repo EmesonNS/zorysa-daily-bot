@@ -1,5 +1,7 @@
 import os
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
@@ -15,6 +17,7 @@ from app.application.projects import ProjectService
 from app.application.report_channels import ReportChannelService
 from app.domain.enums import AssignmentStatus
 from app.infrastructure.database.models import DailyAnswer, DailyAssignment, DailyQuestionSnapshot
+from app.infrastructure.discord import DiscordReportGateway
 
 TODAY = date(2026, 8, 20)
 
@@ -108,8 +111,20 @@ async def test_reserves_and_confirms_each_daily_channel_once(report_context) -> 
 
     prepared = await service.prepare_deliveries(actor.guild_id, TODAY)
     assert [item.channel_id for item in prepared] == [400, 500]
-    for item in prepared:
-        await service.attach_delivery(item.delivery_id, page_count=2)
+    destinations = {
+        channel_id: SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=channel_id)))
+        for channel_id in (400, 500)
+    }
+    bot = MagicMock()
+    bot.get_channel.side_effect = destinations.get
+    errors = await DiscordReportGateway(bot, service).publish_all(prepared)
+    assert errors == ()
+    assert all(destination.send.await_count >= 2 for destination in destinations.values())
+    for destination in destinations.values():
+        assert all(
+            call.kwargs["allowed_mentions"].users is False
+            for call in destination.send.await_args_list
+        )
     assert await service.prepare_deliveries(actor.guild_id, TODAY) == ()
 
 
