@@ -37,6 +37,15 @@ class MemberSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestionSummary:
+    id: int
+    text: str
+    position: int
+    required: bool
+    active: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleSummary:
     timezone: str
     daily_enabled: bool
