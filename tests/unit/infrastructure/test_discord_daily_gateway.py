@@ -76,16 +76,24 @@ async def test_publish_opened_mentions_snapshot_and_attaches_persistent_message(
 
 
 @pytest.mark.parametrize(
-    ("kind", "expected_nonce", "closing_notice"),
+    ("kind", "expected_nonce", "expected_notice"),
     [
-        (NotificationKind.FIRST_REMINDER, 412, False),
-        (NotificationKind.LAST_REMINDER, 413, True),
+        (
+            NotificationKind.FIRST_REMINDER,
+            412,
+            "Primeiro lembrete: não se esqueça de responder à daily.",
+        ),
+        (
+            NotificationKind.LAST_REMINDER,
+            413,
+            "Último lembrete: esta daily será encerrada em breve.",
+        ),
     ],
 )
 async def test_publish_reminder_mentions_only_pending_recipients(
     kind: NotificationKind,
     expected_nonce: int,
-    closing_notice: bool,
+    expected_notice: str,
 ) -> None:
     message = SimpleNamespace(id=9002)
     channel = SimpleNamespace(send=AsyncMock(return_value=message))
@@ -105,7 +113,7 @@ async def test_publish_reminder_mentions_only_pending_recipients(
     kwargs = channel.send.await_args.kwargs
     assert "<@202>" in kwargs["content"]
     assert "<@101>" not in kwargs["content"]
-    assert ("encerrada em breve" in kwargs["content"]) is closing_notice
+    assert expected_notice in kwargs["content"]
     assert kwargs["nonce"] == expected_nonce
     assert kwargs["allowed_mentions"].users is True
     assert kwargs["allowed_mentions"].roles is False

@@ -66,7 +66,9 @@ class DiscordDailyGateway:
 
         channel = self._messageable(reminder.channel_id, reminder.session_id, "send")
         content = " ".join(f"<@{recipient.user_id}>" for recipient in reminder.recipients)
-        if reminder.kind == NotificationKind.LAST_REMINDER:
+        if reminder.kind == NotificationKind.FIRST_REMINDER:
+            content = f"{content}\nPrimeiro lembrete: não se esqueça de responder à daily."
+        elif reminder.kind == NotificationKind.LAST_REMINDER:
             content = f"{content}\nÚltimo lembrete: esta daily será encerrada em breve."
         try:
             message = await channel.send(
