@@ -6,7 +6,12 @@ from discord import app_commands
 
 from app.application.errors import ConflictError
 from app.bot.commands.config import build_config_group
-from app.bot.contracts import AdminRoleSummary, QuestionSummary, ScheduleSummary
+from app.bot.contracts import (
+    AdminRoleSummary,
+    QuestionSummary,
+    ReportChannelSummary,
+    ScheduleSummary,
+)
 
 
 def _interaction() -> MagicMock:
@@ -43,6 +48,14 @@ def _question_command(group: app_commands.Group, name: str) -> app_commands.Comm
     questions = group.get_command("perguntas")
     assert isinstance(questions, app_commands.Group)
     command = questions.get_command(name)
+    assert isinstance(command, app_commands.Command)
+    return command
+
+
+def _report_command(group: app_commands.Group, name: str) -> app_commands.Command:
+    reports = group.get_command("relatorios")
+    assert isinstance(reports, app_commands.Group)
+    command = reports.get_command(name)
     assert isinstance(command, app_commands.Command)
     return command
 
@@ -262,3 +275,60 @@ async def test_question_command_exposes_safe_application_error() -> None:
     ).callback(interaction, "Pergunta", True)
 
     assert interaction.edit_original_response.await_args.kwargs["content"] == "Limite atingido."
+
+
+def test_report_channel_commands_are_registered() -> None:
+    group = build_config_group(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    reports = group.get_command("relatorios")
+
+    assert isinstance(reports, app_commands.Group)
+    assert {command.name for command in reports.commands} == {
+        "canais",
+        "canal-salvar",
+        "canal-remover",
+    }
+
+
+async def test_list_report_channels_formats_mentions_and_flags_ephemerally() -> None:
+    service = MagicMock()
+    service.list_channels = AsyncMock(return_value=(ReportChannelSummary(100, True, False, True),))
+    interaction = _interaction()
+
+    await _report_command(
+        build_config_group(MagicMock(), MagicMock(), MagicMock(), service), "canais"
+    ).callback(interaction)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    content = interaction.edit_original_response.await_args.kwargs["content"]
+    assert "<#100>" in content
+    assert "Diário: sim" in content and "Semanal: não" in content and "Mensal: sim" in content
+
+
+async def test_save_report_channel_passes_channel_id_and_flags() -> None:
+    service = MagicMock()
+    service.save_channel = AsyncMock(return_value=ReportChannelSummary(100, True, False, True))
+    interaction = _interaction()
+    channel = SimpleNamespace(id=100, mention="<#100>")
+
+    await _report_command(
+        build_config_group(MagicMock(), MagicMock(), MagicMock(), service), "canal-salvar"
+    ).callback(interaction, channel, True, False, True)
+
+    assert service.save_channel.await_args.kwargs["channel_id"] == 100
+    assert service.save_channel.await_args.kwargs["daily"] is True
+    assert service.save_channel.await_args.kwargs["weekly"] is False
+    assert service.save_channel.await_args.kwargs["monthly"] is True
+
+
+async def test_remove_report_channel_exposes_safe_error_ephemerally() -> None:
+    service = MagicMock()
+    service.remove_channel = AsyncMock(side_effect=ConflictError("Canal protegido."))
+    interaction = _interaction()
+    channel = SimpleNamespace(id=100, mention="<#100>")
+
+    await _report_command(
+        build_config_group(MagicMock(), MagicMock(), MagicMock(), service), "canal-remover"
+    ).callback(interaction, channel)
+
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    assert interaction.edit_original_response.await_args.kwargs["content"] == "Canal protegido."

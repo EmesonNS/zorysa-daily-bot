@@ -10,6 +10,7 @@ def _bot() -> ZorysaBot:
         guild_admin_service=MagicMock(),
         schedule_service=MagicMock(),
         question_service=MagicMock(),
+        report_channel_service=MagicMock(),
         project_service=MagicMock(),
         daily_service=MagicMock(),
     )

@@ -9,6 +9,8 @@ from app.bot.contracts import (
     GuildAdminPresentationService,
     QuestionPresentationService,
     QuestionSummary,
+    ReportChannelPresentationService,
+    ReportChannelSummary,
     SchedulePresentationService,
     ScheduleSummary,
 )
@@ -56,10 +58,23 @@ def _format_questions(questions: tuple[QuestionSummary, ...]) -> str:
     return "**Perguntas da daily:**\n" + "\n".join(lines)
 
 
+def _format_report_channels(channels: tuple[ReportChannelSummary, ...]) -> str:
+    if not channels:
+        return "Nenhum canal de relatório configurado."
+    lines = [
+        f"• <#{channel.channel_id}> — Diário: {'sim' if channel.daily else 'não'}, "
+        f"Semanal: {'sim' if channel.weekly else 'não'}, "
+        f"Mensal: {'sim' if channel.monthly else 'não'}"
+        for channel in channels
+    ]
+    return "**Canais de relatório:**\n" + "\n".join(lines)
+
+
 def build_config_group(
     service: GuildAdminPresentationService,
     schedule_service: SchedulePresentationService | None = None,
     question_service: QuestionPresentationService | None = None,
+    report_channel_service: ReportChannelPresentationService | None = None,
 ) -> app_commands.Group:
     """Build `/config admin` commands using an injected application service."""
 
@@ -344,6 +359,68 @@ def build_config_group(
         activate_question.autocomplete("pergunta")(question_autocomplete)
         deactivate_question.autocomplete("pergunta")(question_autocomplete)
         config.add_command(questions)
+    if report_channel_service is not None:
+        reports = app_commands.Group(name="relatorios", description="Destinos de relatórios")
+
+        @reports.command(name="canais", description="Lista os canais de relatório")
+        async def list_report_channels(interaction: discord.Interaction) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                channels = await report_channel_service.list_channels(
+                    actor=actor_from_interaction(interaction)
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_report_channels(channels))
+
+        @reports.command(name="canal-salvar", description="Cria ou atualiza um destino")
+        @app_commands.describe(
+            canal="Canal que receberá relatórios",
+            diario="Receber relatório diário",
+            semanal="Receber relatório semanal futuro",
+            mensal="Receber relatório mensal futuro",
+        )
+        async def save_report_channel(
+            interaction: discord.Interaction,
+            canal: discord.TextChannel,
+            diario: bool,
+            semanal: bool,
+            mensal: bool,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                await report_channel_service.save_channel(
+                    actor=actor_from_interaction(interaction),
+                    channel_id=canal.id,
+                    daily=diario,
+                    weekly=semanal,
+                    monthly=mensal,
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(
+                content=f"Canal de relatório salvo: {canal.mention}."
+            )
+
+        @reports.command(name="canal-remover", description="Remove um destino de relatório")
+        async def remove_report_channel(
+            interaction: discord.Interaction, canal: discord.TextChannel
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                await report_channel_service.remove_channel(
+                    actor=actor_from_interaction(interaction), channel_id=canal.id
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(
+                content=f"Canal de relatório removido: {canal.mention}."
+            )
+
+        config.add_command(reports)
     return config
 
 
@@ -352,7 +429,10 @@ def register_config_commands(
     service: GuildAdminPresentationService,
     schedule_service: SchedulePresentationService,
     question_service: QuestionPresentationService,
+    report_channel_service: ReportChannelPresentationService,
 ) -> None:
     """Register the config group on a command tree."""
 
-    tree.add_command(build_config_group(service, schedule_service, question_service))
+    tree.add_command(
+        build_config_group(service, schedule_service, question_service, report_channel_service)
+    )

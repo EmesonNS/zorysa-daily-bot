@@ -21,6 +21,7 @@ from app.application.dto import (
     MemberSummary,
     ProjectSummary,
     QuestionSummary,
+    ReportChannelSummary,
     ScheduleSummary,
 )
 from app.application.errors import ApplicationError
@@ -90,6 +91,24 @@ class QuestionPresentationService(Protocol):
     ) -> QuestionSummary: ...
 
 
+class ReportChannelPresentationService(Protocol):
+    """Application operations consumed by `/config relatorios`."""
+
+    async def list_channels(self, *, actor: ActorContext) -> tuple[ReportChannelSummary, ...]: ...
+
+    async def save_channel(
+        self,
+        *,
+        actor: ActorContext,
+        channel_id: int,
+        daily: bool,
+        weekly: bool,
+        monthly: bool,
+    ) -> ReportChannelSummary: ...
+
+    async def remove_channel(self, *, actor: ActorContext, channel_id: int) -> None: ...
+
+
 class ProjectPresentationService(Protocol):
     """Application operations consumed by the `/projeto` group."""
 
@@ -149,6 +168,8 @@ __all__ = [
     "QuestionPrompt",
     "QuestionPresentationService",
     "QuestionSummary",
+    "ReportChannelPresentationService",
+    "ReportChannelSummary",
     "SchedulePresentationService",
     "ScheduleSummary",
 ]

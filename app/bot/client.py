@@ -14,6 +14,7 @@ from app.bot.contracts import (
     GuildAdminPresentationService,
     ProjectPresentationService,
     QuestionPresentationService,
+    ReportChannelPresentationService,
     SchedulePresentationService,
 )
 from app.bot.views.daily import DailyResponseView
@@ -40,6 +41,7 @@ class ZorysaBot(commands.Bot):
         guild_admin_service: GuildAdminPresentationService | None = None,
         schedule_service: SchedulePresentationService | None = None,
         question_service: QuestionPresentationService | None = None,
+        report_channel_service: ReportChannelPresentationService | None = None,
         project_service: ProjectPresentationService | None = None,
         daily_service: DailyPresentationService | None = None,
         automation_lifecycle: AutomationLifecycle | None = None,
@@ -56,6 +58,7 @@ class ZorysaBot(commands.Bot):
             guild_admin_service,
             schedule_service,
             question_service,
+            report_channel_service,
             project_service,
             daily_service,
         )
@@ -65,10 +68,15 @@ class ZorysaBot(commands.Bot):
             assert guild_admin_service is not None
             assert schedule_service is not None
             assert question_service is not None
+            assert report_channel_service is not None
             assert project_service is not None
             assert daily_service is not None
             register_config_commands(
-                self.tree, guild_admin_service, schedule_service, question_service
+                self.tree,
+                guild_admin_service,
+                schedule_service,
+                question_service,
+                report_channel_service,
             )
             register_project_commands(self.tree, project_service)
             register_daily_commands(self, daily_service, project_service)

@@ -14,6 +14,7 @@ from app.application.daily import DailyService
 from app.application.guild_admin import GuildAdminService
 from app.application.projects import ProjectService
 from app.application.questions import QuestionService
+from app.application.report_channels import ReportChannelService
 from app.application.schedule import ScheduleService
 from app.bot.client import ZorysaBot
 from app.infrastructure.database import Database, DatabaseUnavailableError
@@ -50,6 +51,9 @@ async def run(settings: Settings) -> None:
             guild_admin_service=GuildAdminService(database.sessions, timezone=settings.timezone),
             schedule_service=schedule_service,
             question_service=QuestionService(database.sessions, timezone=settings.timezone),
+            report_channel_service=ReportChannelService(
+                database.sessions, timezone=settings.timezone
+            ),
             project_service=ProjectService(database.sessions, timezone=settings.timezone),
             daily_service=daily_service,
         )
