@@ -99,7 +99,7 @@ def _coordinator(
     return coordinator, actual_scheduler, actual_source, service, gateway
 
 
-async def test_reconcile_guild_adds_or_replaces_four_stable_jobs() -> None:
+async def test_reconcile_guild_adds_or_replaces_five_stable_jobs() -> None:
     coordinator, scheduler, _, _, _ = _coordinator(now=datetime(2026, 8, 19, 11, 0, tzinfo=UTC))
 
     await coordinator.reconcile_guild(81)
@@ -109,6 +109,7 @@ async def test_reconcile_guild_adds_or_replaces_four_stable_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
+        "guild:81:report",
     ]
     for call, stage in zip(scheduler.added, ScheduleStage, strict=True):
         assert call["func"] == coordinator.run_stage
@@ -120,8 +121,8 @@ async def test_reconcile_guild_adds_or_replaces_four_stable_jobs() -> None:
 
     await coordinator.reconcile_guild(81)
 
-    assert len(scheduler.added) == 8
-    assert len(scheduler.jobs) == 4
+    assert len(scheduler.added) == 10
+    assert len(scheduler.jobs) == 5
 
 
 async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
@@ -130,6 +131,7 @@ async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
+        "guild:81:report",
         "guild:999:open",
         "unrelated:job",
     )
@@ -147,6 +149,7 @@ async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
+        "guild:81:report",
         "guild:999:open",
     }
     assert set(scheduler.jobs) == {"unrelated:job"}
@@ -231,7 +234,7 @@ async def test_reconcile_all_isolates_one_guild_recovery_failure() -> None:
 
     await coordinator.reconcile_all()
 
-    assert len(scheduler.added) == 8
+    assert len(scheduler.added) == 10
     service.open_guild.assert_awaited_once_with(82, date(2026, 8, 19))
 
 
@@ -244,3 +247,32 @@ async def test_run_stage_contains_service_failure_inside_its_guild_job() -> None
     await coordinator.run_stage(81, ScheduleStage.OPEN)
 
     gateway.publish_opened.assert_not_awaited()
+
+
+async def test_run_report_stage_prepares_and_publishes_deliveries() -> None:
+    coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 19, 15, 10, tzinfo=UTC))
+    report_service = AsyncMock()
+    report_service.prepare_deliveries.return_value = (SimpleNamespace(delivery_id=7),)
+    report_gateway = AsyncMock()
+    coordinator.bind_reports(report_service, report_gateway)
+
+    await coordinator.run_stage(81, ScheduleStage.REPORT)
+
+    report_service.prepare_deliveries.assert_awaited_once_with(81, date(2026, 8, 19))
+    report_gateway.publish_all.assert_awaited_once_with(
+        report_service.prepare_deliveries.return_value
+    )
+
+
+async def test_report_stage_with_no_destinations_finishes_cleanly() -> None:
+    coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 19, 15, 10, tzinfo=UTC))
+    report_service = AsyncMock()
+    report_service.prepare_deliveries.return_value = ()
+    report_gateway = AsyncMock()
+    coordinator.bind_reports(report_service, report_gateway)
+    await coordinator.run_stage(81, ScheduleStage.REPORT)
+    report_gateway.publish_all.assert_awaited_once_with(())
+
+
+def test_report_job_id_is_stable() -> None:
+    assert SchedulerCoordinator._job_id(81, ScheduleStage.REPORT) == "guild:81:report"

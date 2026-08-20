@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.application.absences import AbsenceService
 from app.application.automatic_daily import AutomaticDailyService
 from app.application.daily import DailyService
+from app.application.daily_reports import DailyReportService
 from app.application.guild_admin import GuildAdminService
 from app.application.projects import ProjectService
 from app.application.questions import QuestionService
@@ -19,7 +20,7 @@ from app.application.report_channels import ReportChannelService
 from app.application.schedule import ScheduleService
 from app.bot.client import ZorysaBot
 from app.infrastructure.database import Database, DatabaseUnavailableError
-from app.infrastructure.discord import DiscordDailyGateway
+from app.infrastructure.discord import DiscordDailyGateway, DiscordReportGateway
 from app.infrastructure.scheduler.coordinator import (
     DatabaseScheduleSource,
     SchedulerAdapter,
@@ -65,6 +66,11 @@ async def run(settings: Settings) -> None:
             schedule_source=DatabaseScheduleSource(database.sessions),
             automatic_service=automatic_service,
             gateway=DiscordDailyGateway(bot, daily_service, automatic_service),
+        )
+        report_service = DailyReportService(database.sessions)
+        coordinator.bind_reports(
+            report_service,
+            DiscordReportGateway(bot, report_service),
         )
         schedule_service.bind_reloader(coordinator)
         bot.bind_automation_lifecycle(

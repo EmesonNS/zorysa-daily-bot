@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily_dto import ClosedDaily, OpenedDaily, PreparedReminder
 from app.application.dto import ScheduleSummary
+from app.application.report_dto import PreparedDailyReport
 from app.domain.enums import NotificationKind, SessionStatus
 from app.infrastructure.database.models import (
     DailySession,
@@ -101,6 +102,18 @@ class DailyGateway(Protocol):
     async def publish_reminder(self, reminder: PreparedReminder) -> int: ...
 
     async def publish_closed(self, closed: ClosedDaily) -> None: ...
+
+
+class DailyReportOperations(Protocol):
+    async def prepare_deliveries(
+        self, guild_id: int, local_date: date
+    ) -> tuple[PreparedDailyReport, ...]: ...
+
+
+class ReportGateway(Protocol):
+    async def publish_all(
+        self, reports: tuple[PreparedDailyReport, ...]
+    ) -> tuple[Exception, ...]: ...
 
 
 class DatabaseScheduleSource:
@@ -208,8 +221,20 @@ class SchedulerCoordinator:
         self._schedule_source = schedule_source
         self._automatic_service = automatic_service
         self._gateway = gateway
+        self._report_service: DailyReportOperations | None = None
+        self._report_gateway: ReportGateway | None = None
         self._clock = clock or (lambda: datetime.now(UTC))
         self._active_tasks: set[asyncio.Task[object]] = set()
+
+    def bind_reports(
+        self, report_service: DailyReportOperations, report_gateway: ReportGateway
+    ) -> None:
+        """Bind the report stage after Discord and persistence are composed."""
+
+        if self._report_service is not None or self._report_gateway is not None:
+            raise ValueError("Report automation is already configured")
+        self._report_service = report_service
+        self._report_gateway = report_gateway
 
     async def reconcile_guild(self, discord_guild_id: int) -> None:
         """Replace one guild's jobs and immediately apply startup recovery rules."""
@@ -276,11 +301,16 @@ class SchedulerCoordinator:
                     NotificationKind.LAST_REMINDER,
                 )
                 await self._publish_reminders(discord_guild_id, reminders)
-            else:
+            elif stage == ScheduleStage.CLOSE:
                 closed = await self._automatic_service.close_guild(
                     discord_guild_id, plan.local_date
                 )
                 await self._publish_closed(discord_guild_id, closed)
+            elif self._report_service is not None and self._report_gateway is not None:
+                reports = await self._report_service.prepare_deliveries(
+                    discord_guild_id, plan.local_date
+                )
+                await self._report_gateway.publish_all(reports)
         except Exception:
             logger.exception(
                 "Automatic daily stage %s failed for guild %s",

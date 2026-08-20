@@ -19,6 +19,7 @@ class ScheduleStage(StrEnum):
     FIRST_REMINDER = "reminder1"
     LAST_REMINDER = "reminder2"
     CLOSE = "close"
+    REPORT = "report"
 
 
 class RecoveryAction(StrEnum):
@@ -59,6 +60,7 @@ def plan_schedule(schedule: ScheduleSummary, now: datetime) -> SchedulePlan:
         (ScheduleStage.FIRST_REMINDER, schedule.first_reminder),
         (ScheduleStage.LAST_REMINDER, schedule.last_reminder),
         (ScheduleStage.CLOSE, schedule.closing),
+        (ScheduleStage.REPORT, schedule.reporting),
     )
     jobs = (
         tuple(

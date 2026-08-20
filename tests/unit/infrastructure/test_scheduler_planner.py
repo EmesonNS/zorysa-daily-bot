@@ -41,7 +41,7 @@ def _local_datetime(
     return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(timezone))
 
 
-def test_plan_builds_four_cron_triggers_with_configured_timezone_days_and_times() -> None:
+def test_plan_builds_five_cron_triggers_with_configured_timezone_days_and_times() -> None:
     schedule = _schedule(execution_days=(0, 2, 4))
 
     plan = plan_schedule(schedule, _local_datetime(2026, 8, 19, 8))
@@ -51,8 +51,10 @@ def test_plan_builds_four_cron_triggers_with_configured_timezone_days_and_times(
         ScheduleStage.FIRST_REMINDER,
         ScheduleStage.LAST_REMINDER,
         ScheduleStage.CLOSE,
+        ScheduleStage.REPORT,
     )
     assert tuple(str(job.trigger.timezone) for job in plan.jobs) == (
+        "America/Belem",
         "America/Belem",
         "America/Belem",
         "America/Belem",
@@ -64,6 +66,7 @@ def test_plan_builds_four_cron_triggers_with_configured_timezone_days_and_times(
         datetime(2026, 8, 19, 10, 30, tzinfo=ZoneInfo("America/Belem")),
         datetime(2026, 8, 19, 11, 30, tzinfo=ZoneInfo("America/Belem")),
         datetime(2026, 8, 19, 12, 0, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 19, 12, 10, tzinfo=ZoneInfo("America/Belem")),
     )
     now = _local_datetime(2026, 8, 19, 8)
     assert tuple(job.trigger.get_next_fire_time(None, now) for job in plan.jobs) == expected
@@ -146,3 +149,15 @@ def test_planner_converts_aware_now_to_guild_timezone() -> None:
 def test_planner_rejects_naive_now() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         plan_schedule(_schedule(), datetime(2026, 8, 19, 9, 0))
+
+
+def test_report_trigger_is_strictly_after_close() -> None:
+    plan = plan_schedule(_schedule(), _local_datetime(2026, 8, 19, 8))
+    close = plan.jobs[-2].trigger.get_next_fire_time(None, _local_datetime(2026, 8, 19, 8))
+    report = plan.jobs[-1].trigger.get_next_fire_time(None, _local_datetime(2026, 8, 19, 8))
+    assert close is not None and report is not None and report > close
+
+
+def test_report_stage_never_appears_as_recovery_action() -> None:
+    plan = plan_schedule(_schedule(), _local_datetime(2026, 8, 19, 13))
+    assert plan.recovery_actions == (RecoveryAction.CLOSE_OVERDUE,)

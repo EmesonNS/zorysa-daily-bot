@@ -144,6 +144,7 @@ async def test_scheduler_cycle_opens_reminds_and_closes_with_postgresql() -> Non
             f"guild:{discord_guild_id}:reminder1",
             f"guild:{discord_guild_id}:reminder2",
             f"guild:{discord_guild_id}:close",
+            f"guild:{discord_guild_id}:report",
         }
         assert len(gateway.opened) == len(gateway.reminders) == len(gateway.closed) == 1
         assert gateway.reminders[0].kind == NotificationKind.FIRST_REMINDER
