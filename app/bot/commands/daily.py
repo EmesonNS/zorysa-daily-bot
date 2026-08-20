@@ -1,5 +1,6 @@
 """Manual daily Slash Commands."""
 
+from datetime import date
 from typing import cast
 
 import discord
@@ -8,6 +9,7 @@ from discord.ext import commands
 
 from app.bot.commands.common import actor_from_interaction, autocomplete_projects
 from app.bot.contracts import (
+    AbsencePresentationService,
     ApplicationError,
     DailyPresentationService,
     ProjectPresentationService,
@@ -20,6 +22,7 @@ def build_daily_group(
     bot: commands.Bot,
     service: DailyPresentationService,
     project_service: ProjectPresentationService,
+    absence_service: AbsencePresentationService | None = None,
 ) -> app_commands.Group:
     """Build `/daily` commands using an injected application service."""
 
@@ -84,6 +87,58 @@ def build_daily_group(
 
     open_daily.autocomplete("projeto")(project_autocomplete)
 
+    if absence_service is not None:
+
+        @daily.command(name="justificar", description="Registra uma ausência justificada")
+        @app_commands.describe(
+            projeto="Projeto da daily",
+            membro="Participante ausente",
+            motivo="Motivo administrativo da ausência",
+            data="Data opcional no formato AAAA-MM-DD",
+        )
+        async def justify_absence(
+            interaction: discord.Interaction,
+            projeto: str,
+            membro: discord.Member,
+            motivo: str,
+            data: str | None = None,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                local_date = date.fromisoformat(data) if data else None
+                justified = await absence_service.justify(
+                    actor=actor_from_interaction(interaction),
+                    project_slug=projeto,
+                    user_id=membro.id,
+                    local_date=local_date,
+                    reason=motivo,
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            if justified.message_id is None:
+                await interaction.edit_original_response(
+                    content="A daily foi atualizada, mas ainda não possui mensagem publicada."
+                )
+                return
+            channel = bot.get_channel(justified.channel_id)
+            if channel is None or not hasattr(channel, "fetch_message"):
+                await interaction.edit_original_response(
+                    content="A ausência foi salva, mas o canal da daily não está acessível."
+                )
+                return
+            try:
+                message = await channel.fetch_message(justified.message_id)
+                await message.edit(embed=render_daily_panel(justified.panel))
+            except discord.HTTPException:
+                await interaction.edit_original_response(
+                    content="A ausência foi salva, mas a mensagem da daily não pôde ser atualizada."
+                )
+                return
+            await interaction.edit_original_response(content="Ausência justificada com sucesso.")
+
+        justify_absence.autocomplete("projeto")(project_autocomplete)
+
     return daily
 
 
@@ -91,7 +146,8 @@ def register_daily_commands(
     bot: commands.Bot,
     service: DailyPresentationService,
     project_service: ProjectPresentationService,
+    absence_service: AbsencePresentationService,
 ) -> None:
     """Register the daily group on a bot command tree."""
 
-    bot.tree.add_command(build_daily_group(bot, service, project_service))
+    bot.tree.add_command(build_daily_group(bot, service, project_service, absence_service))

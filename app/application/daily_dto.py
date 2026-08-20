@@ -62,6 +62,15 @@ class OpenedDaily:
 
 
 @dataclass(frozen=True, slots=True)
+class JustifiedDaily:
+    """Updated public panel plus the existing Discord publication target."""
+
+    panel: DailyPanel
+    channel_id: int
+    message_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ReminderRecipient:
     """Pending participant who should be mentioned in one reminder."""
 

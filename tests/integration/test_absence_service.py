@@ -54,12 +54,12 @@ async def _seed(context):  # type: ignore[no-untyped-def]
 async def test_justifies_pending_and_keeps_reason_private(absence_context) -> None:  # type: ignore[no-untyped-def]
     actor, session_id = await _seed(absence_context)
     now = datetime(2026, 8, 20, 13, tzinfo=UTC)
-    panel = await AbsenceService(absence_context, clock=lambda: now).justify(
+    justified = await AbsenceService(absence_context, clock=lambda: now).justify(
         actor=actor, project_slug="zorysa", user_id=200, local_date=TODAY, reason="Consulta"
     )
 
-    assert panel.participants[0].status == AssignmentStatus.EXCUSED
-    assert not hasattr(panel.participants[0], "excuse_reason")
+    assert justified.panel.participants[0].status == AssignmentStatus.EXCUSED
+    assert not hasattr(justified.panel.participants[0], "excuse_reason")
     async with absence_context() as session:
         assignment = await session.scalar(
             select(DailyAssignment).where(DailyAssignment.session_id == session_id)
@@ -76,19 +76,19 @@ async def test_repeated_justification_updates_metadata_idempotently(absence_cont
     await service.justify(
         actor=actor, project_slug="zorysa", user_id=200, local_date=TODAY, reason="Consulta"
     )
-    panel = await service.justify(
+    justified = await service.justify(
         actor=actor, project_slug="zorysa", user_id=200, local_date=TODAY, reason="Treinamento"
     )
-    assert panel.participants[0].status == AssignmentStatus.EXCUSED
+    assert justified.panel.participants[0].status == AssignmentStatus.EXCUSED
 
 
 async def test_justifies_not_answered_after_close(absence_context) -> None:  # type: ignore[no-untyped-def]
     actor, _ = await _seed(absence_context)
     await AutomaticDailyService(absence_context).close_guild(actor.guild_id, TODAY)
-    panel = await AbsenceService(absence_context).justify(
+    justified = await AbsenceService(absence_context).justify(
         actor=actor, project_slug="zorysa", user_id=200, local_date=TODAY, reason="Férias"
     )
-    assert panel.participants[0].status == AssignmentStatus.EXCUSED
+    assert justified.panel.participants[0].status == AssignmentStatus.EXCUSED
 
 
 async def test_rejects_answered_assignment_and_unauthorized_actor(absence_context) -> None:  # type: ignore[no-untyped-def]

@@ -79,6 +79,26 @@ def test_renderer_shows_closed_result_without_private_answers() -> None:
     assert "Implementei a API secreta" not in str(embed.to_dict())
 
 
+@pytest.mark.parametrize("closed", [False, True])
+def test_renderer_shows_excused_participant_without_reason(closed: bool) -> None:
+    panel = _panel(closed=closed)
+    panel = DailyPanel(
+        session_id=panel.session_id,
+        project_name=panel.project_name,
+        local_date=panel.local_date,
+        status=panel.status,
+        participants=(
+            DailyParticipant(10, "Ada", AssignmentStatus.EXCUSED),
+            panel.participants[1],
+        ),
+    )
+
+    embed = render_daily_panel(panel)
+
+    assert "🏖️ Ada" in embed.fields[1].value
+    assert "motivo" not in str(embed.to_dict()).casefold()
+
+
 def test_persistent_view_has_stable_custom_id() -> None:
     view = DailyResponseView(MagicMock())
 

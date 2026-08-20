@@ -5,6 +5,7 @@ Discord layer depends on the application layer, never the reverse.
 """
 
 from collections.abc import Mapping
+from datetime import date
 from typing import Protocol
 
 from app.application.daily_dto import (
@@ -12,6 +13,7 @@ from app.application.daily_dto import (
     DailyPanel,
     DailyParticipant,
     DailyResponseForm,
+    JustifiedDaily,
     OpenedDaily,
     QuestionPrompt,
 )
@@ -150,8 +152,21 @@ class DailyPresentationService(Protocol):
     ) -> DailyPanel: ...
 
 
+class AbsencePresentationService(Protocol):
+    async def justify(
+        self,
+        *,
+        actor: ActorContext,
+        project_slug: str,
+        user_id: int,
+        local_date: date | None,
+        reason: str,
+    ) -> JustifiedDaily: ...
+
+
 __all__ = [
     "ActorContext",
+    "AbsencePresentationService",
     "AdminRoleSummary",
     "ApplicationError",
     "ClosedDaily",
@@ -161,6 +176,7 @@ __all__ = [
     "DailyResponseForm",
     "GuildAdminPresentationService",
     "MemberSummary",
+    "JustifiedDaily",
     "OpenedDaily",
     "PresentationError",
     "ProjectPresentationService",

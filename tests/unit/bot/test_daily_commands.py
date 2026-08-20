@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 from discord import app_commands
 
 from app.bot.commands.daily import build_daily_group
-from app.bot.contracts import OpenedDaily
+from app.bot.contracts import JustifiedDaily, OpenedDaily
 from tests.unit.bot.test_daily_presentation import _panel
 
 
@@ -21,6 +21,12 @@ def _interaction() -> MagicMock:
 
 def _open_command(group: app_commands.Group) -> app_commands.Command:
     command = group.get_command("abrir")
+    assert isinstance(command, app_commands.Command)
+    return command
+
+
+def _justify_command(group: app_commands.Group) -> app_commands.Command:
+    command = group.get_command("justificar")
     assert isinstance(command, app_commands.Command)
     return command
 
@@ -106,3 +112,43 @@ async def test_open_daily_project_parameter_has_autocomplete() -> None:
     assert [(choice.name, choice.value) for choice in choices] == [
         ("AmazHealth (amazhealth)", "amazhealth")
     ]
+
+
+async def test_justify_daily_updates_existing_message() -> None:
+    absence = MagicMock()
+    absence.justify = AsyncMock(
+        return_value=JustifiedDaily(panel=_panel(), channel_id=55, message_id=999)
+    )
+    message = SimpleNamespace(edit=AsyncMock())
+    channel = SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+    bot = MagicMock()
+    bot.get_channel.return_value = channel
+    interaction = _interaction()
+    member = SimpleNamespace(id=20)
+    group = build_daily_group(bot, MagicMock(), _project_service(), absence)
+
+    await _justify_command(group).callback(
+        interaction, "amazhealth", member, "Consulta médica", "2026-08-19"
+    )
+
+    assert absence.justify.await_args.kwargs["project_slug"] == "amazhealth"
+    assert absence.justify.await_args.kwargs["user_id"] == 20
+    assert str(absence.justify.await_args.kwargs["local_date"]) == "2026-08-19"
+    message.edit.assert_awaited_once()
+    assert "Consulta médica" not in str(message.edit.await_args.kwargs)
+
+
+async def test_justify_daily_reports_missing_message_safely() -> None:
+    absence = MagicMock()
+    absence.justify = AsyncMock(
+        return_value=JustifiedDaily(panel=_panel(), channel_id=55, message_id=None)
+    )
+    bot = MagicMock()
+    interaction = _interaction()
+
+    await _justify_command(
+        build_daily_group(bot, MagicMock(), _project_service(), absence)
+    ).callback(interaction, "amazhealth", SimpleNamespace(id=20), "Férias", None)
+
+    bot.get_channel.assert_not_called()
+    assert "mensagem" in interaction.edit_original_response.await_args.kwargs["content"]

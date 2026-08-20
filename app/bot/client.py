@@ -10,6 +10,7 @@ from app.bot.commands.daily import register_daily_commands
 from app.bot.commands.health import register_health_command
 from app.bot.commands.project import register_project_commands
 from app.bot.contracts import (
+    AbsencePresentationService,
     DailyPresentationService,
     GuildAdminPresentationService,
     ProjectPresentationService,
@@ -44,6 +45,7 @@ class ZorysaBot(commands.Bot):
         report_channel_service: ReportChannelPresentationService | None = None,
         project_service: ProjectPresentationService | None = None,
         daily_service: DailyPresentationService | None = None,
+        absence_service: AbsencePresentationService | None = None,
         automation_lifecycle: AutomationLifecycle | None = None,
     ) -> None:
         intents = discord.Intents.none()
@@ -61,6 +63,7 @@ class ZorysaBot(commands.Bot):
             report_channel_service,
             project_service,
             daily_service,
+            absence_service,
         )
         if any(service is not None for service in services):
             if any(service is None for service in services):
@@ -71,6 +74,7 @@ class ZorysaBot(commands.Bot):
             assert report_channel_service is not None
             assert project_service is not None
             assert daily_service is not None
+            assert absence_service is not None
             register_config_commands(
                 self.tree,
                 guild_admin_service,
@@ -79,7 +83,7 @@ class ZorysaBot(commands.Bot):
                 report_channel_service,
             )
             register_project_commands(self.tree, project_service)
-            register_daily_commands(self, daily_service, project_service)
+            register_daily_commands(self, daily_service, project_service, absence_service)
 
     async def setup_hook(self) -> None:
         """Synchronize commands globally or to the configured development guild."""

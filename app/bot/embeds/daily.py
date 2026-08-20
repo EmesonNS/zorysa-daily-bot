@@ -45,6 +45,8 @@ def render_daily_panel(panel: DailyPanel) -> discord.Embed:
 def _participant_icon(panel: DailyPanel, status: AssignmentStatus) -> str:
     if status == AssignmentStatus.ANSWERED:
         return "✅"
+    if status == AssignmentStatus.EXCUSED:
+        return "🏖️"
     if panel.status == SessionStatus.CLOSED:
         return "❌"
     return "⏳"

@@ -9,6 +9,7 @@ import discord
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
+from app.application.absences import AbsenceService
 from app.application.automatic_daily import AutomaticDailyService
 from app.application.daily import DailyService
 from app.application.guild_admin import GuildAdminService
@@ -56,6 +57,7 @@ async def run(settings: Settings) -> None:
             ),
             project_service=ProjectService(database.sessions, timezone=settings.timezone),
             daily_service=daily_service,
+            absence_service=AbsenceService(database.sessions, timezone=settings.timezone),
         )
         scheduler = AsyncIOScheduler(timezone=UTC)
         coordinator = SchedulerCoordinator(

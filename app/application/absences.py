@@ -2,17 +2,24 @@
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily import DailyService
-from app.application.daily_dto import DailyPanel
+from app.application.daily_dto import JustifiedDaily
 from app.application.dto import ActorContext
 from app.application.errors import ConflictError, NotFoundError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
 from app.domain.enums import AssignmentStatus
-from app.infrastructure.database.models import DailyAssignment, DailySession, Guild, Project
+from app.infrastructure.database.models import (
+    DailyAssignment,
+    DailySession,
+    Guild,
+    GuildSettings,
+    Project,
+)
 
 
 class AbsenceService:
@@ -35,9 +42,9 @@ class AbsenceService:
         actor: ActorContext,
         project_slug: str,
         user_id: int,
-        local_date: date,
+        local_date: date | None,
         reason: str,
-    ) -> DailyPanel:
+    ) -> JustifiedDaily:
         """Set or update EXCUSED metadata before or after daily closure."""
 
         clean_reason = reason.strip()
@@ -48,6 +55,11 @@ class AbsenceService:
 
         async with self._sessions() as session, session.begin():
             guild = await self._authorized_guild(session, actor)
+            if local_date is None:
+                timezone = await session.scalar(
+                    select(GuildSettings.timezone).where(GuildSettings.guild_id == guild.id)
+                )
+                local_date = self._now().astimezone(ZoneInfo(timezone or self._timezone)).date()
             row = (
                 await session.execute(
                     select(DailyAssignment, DailySession, Project)
@@ -79,7 +91,11 @@ class AbsenceService:
             assignment.excused_by_user_id = actor.user_id
             assignment.excuse_reason = clean_reason
             await session.flush()
-            return await DailyService._panel(session, daily_session, project.name)
+            return JustifiedDaily(
+                panel=await DailyService._panel(session, daily_session, project.name),
+                channel_id=project.discord_channel_id,
+                message_id=daily_session.message_id,
+            )
 
     async def _authorized_guild(self, session: AsyncSession, actor: ActorContext) -> Guild:
         guild = await ensure_guild_record(
