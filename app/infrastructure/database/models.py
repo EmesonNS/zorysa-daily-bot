@@ -87,6 +87,12 @@ class Guild(TimestampMixin, Base):
     execution_days: Mapped[list["GuildExecutionDay"]] = relationship(
         back_populates="guild", cascade="all, delete-orphan"
     )
+    report_channels: Mapped[list["ReportChannel"]] = relationship(
+        back_populates="guild", cascade="all, delete-orphan"
+    )
+    report_deliveries: Mapped[list["DailyReportDelivery"]] = relationship(
+        back_populates="guild", cascade="all, delete-orphan"
+    )
 
 
 class GuildSettings(TimestampMixin, Base):
@@ -115,6 +121,9 @@ class GuildSettings(TimestampMixin, Base):
     daily_close_time: Mapped[time] = mapped_column(
         Time, nullable=False, server_default=sql_text("'12:00:00'")
     )
+    daily_report_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'12:10:00'")
+    )
 
     guild: Mapped[Guild] = relationship(back_populates="settings")
 
@@ -131,6 +140,57 @@ class GuildExecutionDay(Base):
     weekday: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
 
     guild: Mapped[Guild] = relationship(back_populates="execution_days")
+
+
+class ReportChannel(TimestampMixin, Base):
+    """Discord channel configured to receive one or more report types."""
+
+    __tablename__ = "report_channels"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "discord_channel_id",
+            name="uq_report_channels_guild_discord_channel",
+        ),
+    )
+
+    id: Mapped[PrimaryKey]
+    guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"))
+    discord_channel_id: Mapped[DiscordId]
+    daily_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("true")
+    )
+    weekly_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("false")
+    )
+    monthly_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("false")
+    )
+
+    guild: Mapped[Guild] = relationship(back_populates="report_channels")
+
+
+class DailyReportDelivery(TimestampMixin, Base):
+    """Idempotent publication marker for one guild, local date, and channel."""
+
+    __tablename__ = "daily_report_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "report_date",
+            "discord_channel_id",
+            name="uq_daily_report_deliveries_guild_date_channel",
+        ),
+    )
+
+    id: Mapped[PrimaryKey]
+    guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"))
+    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    discord_channel_id: Mapped[DiscordId]
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    page_count: Mapped[int | None] = mapped_column(Integer)
+
+    guild: Mapped[Guild] = relationship(back_populates="report_deliveries")
 
 
 class AdminRole(TimestampMixin, Base):
@@ -301,6 +361,13 @@ class DailyAssignment(TimestampMixin, Base):
     __tablename__ = "daily_assignments"
     __table_args__ = (
         UniqueConstraint("session_id", "discord_user_id", name="uq_daily_assignments_session_user"),
+        CheckConstraint(
+            "(status = 'EXCUSED' AND excused_at IS NOT NULL "
+            "AND excused_by_user_id IS NOT NULL AND excuse_reason IS NOT NULL) "
+            "OR (status <> 'EXCUSED' AND excused_at IS NULL "
+            "AND excused_by_user_id IS NULL AND excuse_reason IS NULL)",
+            name="excused_metadata",
+        ),
     )
 
     id: Mapped[PrimaryKey]
@@ -319,6 +386,9 @@ class DailyAssignment(TimestampMixin, Base):
         server_default=sql_text("'PENDING'"),
     )
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    excused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    excused_by_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    excuse_reason: Mapped[str | None] = mapped_column(Text)
 
     session: Mapped[DailySession] = relationship(back_populates="assignments")
     answers: Mapped[list["DailyAnswer"]] = relationship(

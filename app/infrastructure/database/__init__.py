@@ -9,12 +9,14 @@ from app.infrastructure.database.models import (
     DailyNotification,
     DailyQuestion,
     DailyQuestionSnapshot,
+    DailyReportDelivery,
     DailySession,
     Guild,
     GuildExecutionDay,
     GuildSettings,
     Project,
     ProjectMembership,
+    ReportChannel,
 )
 
 __all__ = [
@@ -25,6 +27,7 @@ __all__ = [
     "DailyNotification",
     "DailyQuestion",
     "DailyQuestionSnapshot",
+    "DailyReportDelivery",
     "DailySession",
     "Database",
     "DatabaseUnavailableError",
@@ -33,4 +36,5 @@ __all__ = [
     "GuildSettings",
     "Project",
     "ProjectMembership",
+    "ReportChannel",
 ]

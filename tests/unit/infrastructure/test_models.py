@@ -9,9 +9,11 @@ from app.domain.enums import (
 )
 from app.infrastructure.database.models import (
     Base,
+    DailyAssignment,
     GuildExecutionDay,
     GuildSettings,
     ProjectMembership,
+    ReportChannel,
 )
 
 
@@ -29,6 +31,8 @@ def test_manual_daily_metadata_contains_all_expected_tables() -> None:
         "guilds",
         "project_memberships",
         "projects",
+        "report_channels",
+        "daily_report_deliveries",
     }
 
 
@@ -40,6 +44,7 @@ def test_domain_enums_use_stable_persisted_values() -> None:
         "ANSWERED",
         "ABSENT",
         "NOT_ANSWERED",
+        "EXCUSED",
     ]
     assert [kind.value for kind in NotificationKind] == [
         "FIRST_REMINDER",
@@ -121,3 +126,52 @@ def test_execution_day_uses_composite_key_and_valid_weekday_check() -> None:
         and str(constraint.sqltext) == "weekday >= 0 AND weekday <= 6"
         for constraint in table.constraints
     )
+
+
+def test_report_channel_is_unique_per_guild() -> None:
+    constraints = Base.metadata.tables["report_channels"].constraints
+
+    assert any(
+        isinstance(constraint, UniqueConstraint)
+        and constraint.name == "uq_report_channels_guild_discord_channel"
+        for constraint in constraints
+    )
+
+
+def test_report_delivery_is_unique_per_guild_date_and_channel() -> None:
+    constraints = Base.metadata.tables["daily_report_deliveries"].constraints
+
+    assert any(
+        isinstance(constraint, UniqueConstraint)
+        and constraint.name == "uq_daily_report_deliveries_guild_date_channel"
+        for constraint in constraints
+    )
+
+
+def test_excused_assignment_requires_complete_metadata() -> None:
+    constraint = next(
+        constraint
+        for constraint in DailyAssignment.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_daily_assignments_excused_metadata"
+    )
+
+    assert "status = 'EXCUSED'" in str(constraint.sqltext)
+    assert "excused_at IS NOT NULL" in str(constraint.sqltext)
+    assert "excused_by_user_id IS NOT NULL" in str(constraint.sqltext)
+    assert "excuse_reason IS NOT NULL" in str(constraint.sqltext)
+
+
+def test_daily_report_time_has_expected_default_and_type() -> None:
+    column = GuildSettings.__table__.columns.daily_report_time
+
+    assert str(column.server_default.arg) == "'12:10:00'"
+    assert type(column.type).__name__ == "Time"
+
+
+def test_report_channel_flags_have_daily_only_defaults() -> None:
+    columns = ReportChannel.__table__.columns
+
+    assert str(columns.daily_enabled.server_default.arg) == "true"
+    assert str(columns.weekly_enabled.server_default.arg) == "false"
+    assert str(columns.monthly_enabled.server_default.arg) == "false"

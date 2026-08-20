@@ -24,6 +24,7 @@ class AssignmentStatus(StrEnum):
     ANSWERED = "ANSWERED"
     ABSENT = "ABSENT"
     NOT_ANSWERED = "NOT_ANSWERED"
+    EXCUSED = "EXCUSED"
 
 
 class NotificationKind(StrEnum):
