@@ -46,6 +46,14 @@ class QuestionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ReportChannelSummary:
+    channel_id: int
+    daily: bool
+    weekly: bool
+    monthly: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleSummary:
     timezone: str
     daily_enabled: bool
