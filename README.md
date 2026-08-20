@@ -61,8 +61,8 @@ No Discord Developer Portal:
    privilegiados (`Presence`, `Server Members` e `Message Content`). O bot usa apenas o intent
    de guilds.
 2. Em **OAuth2 > URL Generator**, selecione os escopos `bot` e `applications.commands`.
-3. Nas permissões do bot, selecione `View Channels`, `Send Messages` e `Embed Links`, gere o
-   convite e adicione o bot ao servidor desejado.
+3. Nas permissões do bot, selecione `View Channels`, `Send Messages`, `Embed Links` e
+   `Read Message History`, gere o convite e adicione o bot ao servidor desejado.
 
 Após conectar, use `/health` para verificar o nome do bot, a latência e a guild atual.
 
@@ -82,6 +82,44 @@ mostra apenas quem respondeu; o conteúdo das respostas permanece no banco.
 
 Se `DISCORD_GUILD_ID` estiver configurado, reinicie o container para sincronizar os novos comandos
 imediatamente nessa guild. Sem essa variável, a sincronização é global e pode levar mais tempo.
+
+## Daily automática
+
+Cada servidor possui uma agenda própria. Os defaults são segunda a sexta no timezone
+`America/Belem`: abertura às `09:00`, primeiro lembrete às `10:30`, último lembrete às `11:30`
+e fechamento às `12:00`.
+
+Os comandos administrativos são:
+
+- `/config agenda visualizar`
+- `/config agenda horarios abertura primeiro-lembrete ultimo-lembrete fechamento`
+- `/config agenda timezone valor`
+- `/config agenda dia-adicionar dia`
+- `/config agenda dia-remover dia`
+
+Alterações são aplicadas sem reiniciar o bot. Na abertura, cada projeto ativo e habilitado com
+participantes recebe uma sessão e todos são mencionados. Os lembretes mencionam somente quem
+ainda não respondeu. No fechamento, pendentes passam para `NOT_ANSWERED`, o botão é removido e o
+painel mostra ✅ para quem respondeu e ❌ para quem não respondeu; respostas privadas nunca são
+publicadas.
+
+Se o bot reconectar entre abertura e fechamento, ele cria sessões que estiverem faltando e segue
+somente com as próximas etapas. Lembretes vencidos não são repetidos. Sessões abertas cujo prazo
+já passou são encerradas imediatamente, inclusive se forem de um dia anterior.
+
+### UAT rápido em uma guild de teste
+
+1. Confirme `/health`, um cargo administrativo, um projeto, seu canal e ao menos um participante.
+2. Use `/config agenda visualizar` e confirme timezone e dia atual.
+3. Em `/config agenda horarios`, informe quatro horários futuros separados por poucos minutos,
+   sempre na ordem estrita abertura < primeiro lembrete < último lembrete < fechamento.
+4. Observe a abertura com menções, responda com um participante e confirme que ele não aparece
+   nos lembretes seguintes.
+5. No fechamento, confirme o painel ✅/❌ e que o botão **Responder daily** desapareceu.
+6. Restaure os horários padrão com `09:00`, `10:30`, `11:30` e `12:00`.
+
+Faça esse teste apenas em uma guild e canal de desenvolvimento. O bot real usa o relógio e o
+timezone configurados; não é necessário expor token, URL do banco ou qualquer resposta privada.
 
 ## Gate de qualidade
 

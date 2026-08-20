@@ -2,16 +2,30 @@
 
 import asyncio
 import logging
+from datetime import UTC
+from typing import cast
 
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
+from app.application.automatic_daily import AutomaticDailyService
 from app.application.daily import DailyService
 from app.application.guild_admin import GuildAdminService
 from app.application.projects import ProjectService
 from app.application.schedule import ScheduleService
 from app.bot.client import ZorysaBot
 from app.infrastructure.database import Database, DatabaseUnavailableError
+from app.infrastructure.discord import DiscordDailyGateway
+from app.infrastructure.scheduler.coordinator import (
+    DatabaseScheduleSource,
+    SchedulerAdapter,
+    SchedulerCoordinator,
+)
+from app.infrastructure.scheduler.lifecycle import (
+    LifecycleScheduler,
+    SchedulerLifecycle,
+)
 from app.logging import configure_logging
 from app.settings import Settings
 
@@ -26,13 +40,30 @@ async def run(settings: Settings) -> None:
         await database.check_readiness()
         logger.info("Database readiness check passed")
 
+        daily_service = DailyService(database.sessions, timezone=settings.timezone)
+        automatic_service = AutomaticDailyService(database.sessions)
+        schedule_service = ScheduleService(database.sessions, timezone=settings.timezone)
         bot = ZorysaBot(
             app_name=settings.app_name,
             guild_id=settings.discord_guild_id,
             guild_admin_service=GuildAdminService(database.sessions, timezone=settings.timezone),
-            schedule_service=ScheduleService(database.sessions, timezone=settings.timezone),
+            schedule_service=schedule_service,
             project_service=ProjectService(database.sessions, timezone=settings.timezone),
-            daily_service=DailyService(database.sessions, timezone=settings.timezone),
+            daily_service=daily_service,
+        )
+        scheduler = AsyncIOScheduler(timezone=UTC)
+        coordinator = SchedulerCoordinator(
+            scheduler=cast(SchedulerAdapter, scheduler),
+            schedule_source=DatabaseScheduleSource(database.sessions),
+            automatic_service=automatic_service,
+            gateway=DiscordDailyGateway(bot, daily_service, automatic_service),
+        )
+        schedule_service.bind_reloader(coordinator)
+        bot.bind_automation_lifecycle(
+            SchedulerLifecycle(
+                cast(LifecycleScheduler, scheduler),
+                coordinator,
+            )
         )
         try:
             logger.info("Starting %s", settings.app_name)

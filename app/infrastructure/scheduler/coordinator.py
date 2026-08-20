@@ -1,5 +1,6 @@
 """In-memory scheduler reconciliation and automatic daily job orchestration."""
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -206,6 +207,7 @@ class SchedulerCoordinator:
         self._automatic_service = automatic_service
         self._gateway = gateway
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._active_tasks: set[asyncio.Task[object]] = set()
 
     async def reconcile_guild(self, discord_guild_id: int) -> None:
         """Replace one guild's jobs and immediately apply startup recovery rules."""
@@ -247,6 +249,9 @@ class SchedulerCoordinator:
     async def run_stage(self, discord_guild_id: int, stage: ScheduleStage) -> None:
         """Execute one scheduled guild stage without leaking failures to other jobs."""
 
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._active_tasks.add(current_task)
         try:
             schedule = await self._schedule_source.get_guild_schedule(discord_guild_id)
             if schedule is None or not schedule.daily_enabled:
@@ -280,6 +285,17 @@ class SchedulerCoordinator:
                 stage.value,
                 discord_guild_id,
             )
+        finally:
+            if current_task is not None:
+                self._active_tasks.discard(current_task)
+
+    async def wait_for_idle(self, max_wait: float) -> None:
+        """Wait briefly for active scheduler jobs without cancelling application tasks."""
+
+        current_task = asyncio.current_task()
+        pending = tuple(task for task in self._active_tasks if task is not current_task)
+        if pending:
+            await asyncio.wait(pending, timeout=max_wait)
 
     async def _reconcile_record(self, record: GuildSchedule, now: datetime) -> None:
         plan = plan_schedule(record.schedule, now)

@@ -36,6 +36,13 @@ class ScheduleService:
         self._default_timezone = timezone
         self._reloader = reloader
 
+    def bind_reloader(self, reloader: ScheduleReloader) -> None:
+        """Bind the scheduler after the Discord client composition is complete."""
+
+        if self._reloader is not None:
+            raise ValueError("Schedule reloader is already configured")
+        self._reloader = reloader
+
     async def get_schedule(self, *, actor: ActorContext) -> ScheduleSummary:
         """Return the authorized guild schedule."""
 

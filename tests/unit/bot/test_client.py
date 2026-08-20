@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
 
 import discord
 import pytest
@@ -47,3 +47,28 @@ async def test_health_reports_bot_name_latency_and_current_guild() -> None:
     assert "42 ms" in content
     assert "LACIS" in content
     assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+async def test_bot_delegates_scheduler_lifecycle_and_closes_it_first() -> None:
+    lifecycle = MagicMock()
+    lifecycle.setup = AsyncMock()
+    lifecycle.ready = AsyncMock()
+    lifecycle.disconnect = AsyncMock()
+    lifecycle.shutdown = AsyncMock()
+    bot = ZorysaBot(app_name="Zorysa Daily Bot", automation_lifecycle=lifecycle)
+    bot.tree.sync = AsyncMock()
+
+    await bot.setup_hook()
+    await bot.on_ready()
+    await bot.on_disconnect()
+    parent_close = AsyncMock()
+    with patch("discord.ext.commands.Bot.close", parent_close):
+        manager = MagicMock()
+        manager.attach_mock(lifecycle.shutdown, "scheduler")
+        manager.attach_mock(parent_close, "discord")
+        await bot.close()
+        assert manager.mock_calls == [call.scheduler(), call.discord()]
+
+    lifecycle.setup.assert_awaited_once_with()
+    lifecycle.ready.assert_awaited_once_with()
+    lifecycle.disconnect.assert_awaited_once_with()

@@ -1,5 +1,7 @@
 """Discord client configuration."""
 
+from typing import Protocol
+
 import discord
 from discord.ext import commands
 
@@ -16,6 +18,16 @@ from app.bot.contracts import (
 from app.bot.views.daily import DailyResponseView
 
 
+class AutomationLifecycle(Protocol):
+    async def setup(self) -> None: ...
+
+    async def ready(self) -> None: ...
+
+    async def disconnect(self) -> None: ...
+
+    async def shutdown(self) -> None: ...
+
+
 class ZorysaBot(commands.Bot):
     """Discord bot with the minimum intents required for Slash Commands."""
 
@@ -28,6 +40,7 @@ class ZorysaBot(commands.Bot):
         schedule_service: SchedulePresentationService | None = None,
         project_service: ProjectPresentationService | None = None,
         daily_service: DailyPresentationService | None = None,
+        automation_lifecycle: AutomationLifecycle | None = None,
     ) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
@@ -35,6 +48,7 @@ class ZorysaBot(commands.Bot):
 
         self._sync_guild = discord.Object(id=guild_id) if guild_id is not None else None
         self._daily_service = daily_service
+        self._automation_lifecycle = automation_lifecycle
         register_health_command(self, app_name=app_name)
         services = (guild_admin_service, schedule_service, project_service, daily_service)
         if any(service is not None for service in services):
@@ -51,6 +65,9 @@ class ZorysaBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Synchronize commands globally or to the configured development guild."""
 
+        if self._automation_lifecycle is not None:
+            await self._automation_lifecycle.setup()
+
         if self._daily_service is not None:
             self.add_view(DailyResponseView(self._daily_service))
 
@@ -60,3 +77,23 @@ class ZorysaBot(commands.Bot):
 
         self.tree.copy_global_to(guild=self._sync_guild)
         await self.tree.sync(guild=self._sync_guild)
+
+    def bind_automation_lifecycle(self, lifecycle: AutomationLifecycle) -> None:
+        """Bind the fully composed scheduler before Discord starts."""
+
+        if self._automation_lifecycle is not None:
+            raise ValueError("Automation lifecycle is already configured")
+        self._automation_lifecycle = lifecycle
+
+    async def on_ready(self) -> None:
+        if self._automation_lifecycle is not None:
+            await self._automation_lifecycle.ready()
+
+    async def on_disconnect(self) -> None:
+        if self._automation_lifecycle is not None:
+            await self._automation_lifecycle.disconnect()
+
+    async def close(self) -> None:
+        if self._automation_lifecycle is not None:
+            await self._automation_lifecycle.shutdown()
+        await super().close()
