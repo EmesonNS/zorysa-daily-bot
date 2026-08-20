@@ -234,11 +234,12 @@ class DailyService:
             session_id=daily_session.id,
             project_name=project_name,
             local_date=daily_session.session_date,
+            status=daily_session.status,
             participants=tuple(
                 DailyParticipant(
                     user_id=assignment.discord_user_id,
                     display_name=assignment.display_name,
-                    answered=assignment.status == AssignmentStatus.ANSWERED,
+                    status=assignment.status,
                 )
                 for assignment in assignments
             ),

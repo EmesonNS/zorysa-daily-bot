@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Protocol
 
 from app.application.daily_dto import (
+    ClosedDaily,
     DailyPanel,
     DailyParticipant,
     DailyResponseForm,
@@ -105,6 +106,7 @@ __all__ = [
     "ActorContext",
     "AdminRoleSummary",
     "ApplicationError",
+    "ClosedDaily",
     "DailyPanel",
     "DailyParticipant",
     "DailyPresentationService",

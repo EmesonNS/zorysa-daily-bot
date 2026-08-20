@@ -15,16 +15,26 @@ from app.bot.contracts import (
 from app.bot.embeds.daily import render_daily_panel
 from app.bot.modals.daily import DailyResponseModal
 from app.bot.views.daily import DAILY_RESPONSE_CUSTOM_ID, DailyResponseView
+from app.domain.enums import AssignmentStatus, SessionStatus
 
 
-def _panel(*, answered: bool = False) -> DailyPanel:
+def _panel(*, answered: bool = False, closed: bool = False) -> DailyPanel:
     return DailyPanel(
         session_id=7,
         project_name="AmazHealth",
         local_date=date(2026, 8, 19),
+        status=SessionStatus.CLOSED if closed else SessionStatus.OPEN,
         participants=(
-            DailyParticipant(user_id=10, display_name="Ada", answered=answered),
-            DailyParticipant(user_id=20, display_name="Linus", answered=False),
+            DailyParticipant(
+                user_id=10,
+                display_name="Ada",
+                status=AssignmentStatus.ANSWERED if answered else AssignmentStatus.PENDING,
+            ),
+            DailyParticipant(
+                user_id=20,
+                display_name="Linus",
+                status=(AssignmentStatus.NOT_ANSWERED if closed else AssignmentStatus.PENDING),
+            ),
         ),
     )
 
@@ -58,6 +68,15 @@ def test_renderer_shows_progress_and_participant_states() -> None:
     assert embed.fields[0].value == "1/2 responderam"
     assert "✅ Ada" in embed.fields[1].value
     assert "⏳ Linus" in embed.fields[1].value
+
+
+def test_renderer_shows_closed_result_without_private_answers() -> None:
+    embed = render_daily_panel(_panel(answered=True, closed=True))
+
+    assert "✅ Ada" in embed.fields[1].value
+    assert "❌ Linus" in embed.fields[1].value
+    assert "daily encerrada" in (embed.footer.text or "").lower()
+    assert "Implementei a API secreta" not in str(embed.to_dict())
 
 
 def test_persistent_view_has_stable_custom_id() -> None:

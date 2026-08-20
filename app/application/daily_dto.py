@@ -1,9 +1,9 @@
 """Data contracts for the manual daily workflow."""
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
-from app.domain.enums import NotificationKind
+from app.domain.enums import AssignmentStatus, NotificationKind, SessionStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,7 +12,13 @@ class DailyParticipant:
 
     user_id: int
     display_name: str
-    answered: bool
+    status: AssignmentStatus
+
+    @property
+    def answered(self) -> bool:
+        """Preserve the public answered flag used by existing presentation flows."""
+
+        return self.status == AssignmentStatus.ANSWERED
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +28,7 @@ class DailyPanel:
     session_id: int
     project_name: str
     local_date: date
+    status: SessionStatus
     participants: tuple[DailyParticipant, ...]
 
 
@@ -72,3 +79,13 @@ class PreparedReminder:
     channel_id: int
     kind: NotificationKind
     recipients: tuple[ReminderRecipient, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ClosedDaily:
+    """Final public panel and Discord target for one closed session."""
+
+    panel: DailyPanel
+    channel_id: int
+    message_id: int | None
+    closed_at: datetime

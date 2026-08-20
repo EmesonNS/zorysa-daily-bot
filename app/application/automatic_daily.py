@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily import DailyService, _open_project_session
 from app.application.daily_dto import (
+    ClosedDaily,
     OpenedDaily,
     PreparedReminder,
     ReminderRecipient,
@@ -83,6 +84,56 @@ class AutomaticDailyService:
             notification.message_id = message_id
             if notification.sent_at is None:
                 notification.sent_at = self._now()
+
+    async def close_guild(self, discord_guild_id: int, local_date: date) -> tuple[ClosedDaily, ...]:
+        """Close or reuse every persisted session for one guild and local date."""
+
+        async with self._sessions() as session, session.begin():
+            rows = (
+                await session.execute(
+                    select(DailySession, Project)
+                    .join(Project, Project.id == DailySession.project_id)
+                    .join(Guild, Guild.id == Project.guild_id)
+                    .where(
+                        Guild.discord_guild_id == discord_guild_id,
+                        DailySession.session_date == local_date,
+                    )
+                    .order_by(Project.name, DailySession.id)
+                    .with_for_update(of=DailySession)
+                )
+            ).all()
+            closed: list[ClosedDaily] = []
+            for daily_session, project in rows:
+                if daily_session.status == SessionStatus.OPEN:
+                    daily_session.status = SessionStatus.CLOSED
+                    if daily_session.closed_at is None:
+                        daily_session.closed_at = self._now()
+                    assignments = (
+                        await session.scalars(
+                            select(DailyAssignment).where(
+                                DailyAssignment.session_id == daily_session.id,
+                                DailyAssignment.status == AssignmentStatus.PENDING,
+                            )
+                        )
+                    ).all()
+                    for assignment in assignments:
+                        assignment.status = AssignmentStatus.NOT_ANSWERED
+                await session.flush()
+                if daily_session.closed_at is None:
+                    raise RuntimeError("Sessão fechada sem instante de fechamento.")
+                closed.append(
+                    ClosedDaily(
+                        panel=await DailyService._panel(
+                            session,
+                            daily_session,
+                            project.name,
+                        ),
+                        channel_id=project.discord_channel_id,
+                        message_id=daily_session.message_id,
+                        closed_at=daily_session.closed_at,
+                    )
+                )
+            return tuple(closed)
 
     async def _eligible_project_ids(self, discord_guild_id: int) -> tuple[int, ...]:
         has_active_member = exists(
