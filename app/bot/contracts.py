@@ -20,6 +20,7 @@ from app.application.dto import (
     AdminRoleSummary,
     MemberSummary,
     ProjectSummary,
+    QuestionSummary,
     ScheduleSummary,
 )
 from app.application.errors import ApplicationError
@@ -60,6 +61,33 @@ class SchedulePresentationService(Protocol):
     async def remove_execution_day(
         self, *, actor: ActorContext, weekday: int
     ) -> ScheduleSummary: ...
+
+
+class QuestionPresentationService(Protocol):
+    """Application operations consumed by `/config perguntas`."""
+
+    async def list_questions(self, *, actor: ActorContext) -> tuple[QuestionSummary, ...]: ...
+
+    async def add_question(
+        self, *, actor: ActorContext, text: str, required: bool
+    ) -> QuestionSummary: ...
+
+    async def edit_question(
+        self,
+        *,
+        actor: ActorContext,
+        question_id: int,
+        text: str,
+        required: bool,
+    ) -> QuestionSummary: ...
+
+    async def move_question(
+        self, *, actor: ActorContext, question_id: int, position: int
+    ) -> tuple[QuestionSummary, ...]: ...
+
+    async def set_question_active(
+        self, *, actor: ActorContext, question_id: int, active: bool
+    ) -> QuestionSummary: ...
 
 
 class ProjectPresentationService(Protocol):
@@ -119,6 +147,8 @@ __all__ = [
     "ProjectPresentationService",
     "ProjectSummary",
     "QuestionPrompt",
+    "QuestionPresentationService",
+    "QuestionSummary",
     "SchedulePresentationService",
     "ScheduleSummary",
 ]

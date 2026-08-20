@@ -7,6 +7,8 @@ from app.bot.commands.common import actor_from_interaction
 from app.bot.contracts import (
     ApplicationError,
     GuildAdminPresentationService,
+    QuestionPresentationService,
+    QuestionSummary,
     SchedulePresentationService,
     ScheduleSummary,
 )
@@ -41,9 +43,23 @@ def _format_schedule(schedule: ScheduleSummary) -> str:
     )
 
 
+def _format_questions(questions: tuple[QuestionSummary, ...]) -> str:
+    if not questions:
+        return "Nenhuma pergunta configurada."
+    lines = []
+    for question in questions:
+        state = "Ativa" if question.active else "Inativa"
+        requirement = "Obrigatória" if question.required else "Opcional"
+        lines.append(
+            f"{question.position}. `#{question.id}` {question.text} — {state}, {requirement}"
+        )
+    return "**Perguntas da daily:**\n" + "\n".join(lines)
+
+
 def build_config_group(
     service: GuildAdminPresentationService,
     schedule_service: SchedulePresentationService | None = None,
+    question_service: QuestionPresentationService | None = None,
 ) -> app_commands.Group:
     """Build `/config admin` commands using an injected application service."""
 
@@ -191,6 +207,143 @@ def build_config_group(
             await interaction.edit_original_response(content=_format_schedule(schedule))
 
         config.add_command(agenda)
+    if question_service is not None:
+        questions = app_commands.Group(name="perguntas", description="Perguntas da daily")
+
+        async def respond_error(interaction: discord.Interaction, error: Exception) -> None:
+            await interaction.edit_original_response(content=str(error))
+
+        @questions.command(name="listar", description="Lista as perguntas configuradas")
+        async def list_questions(interaction: discord.Interaction) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                result = await question_service.list_questions(
+                    actor=actor_from_interaction(interaction)
+                )
+            except (ApplicationError, ValueError) as error:
+                await respond_error(interaction, error)
+                return
+            await interaction.edit_original_response(content=_format_questions(result))
+
+        @questions.command(name="adicionar", description="Adiciona uma pergunta ativa")
+        @app_commands.describe(
+            texto="Texto da nova pergunta",
+            obrigatoria="Se a resposta será obrigatória",
+        )
+        async def add_question(
+            interaction: discord.Interaction, texto: str, obrigatoria: bool
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                result = await question_service.add_question(
+                    actor=actor_from_interaction(interaction),
+                    text=texto,
+                    required=obrigatoria,
+                )
+            except (ApplicationError, ValueError) as error:
+                await respond_error(interaction, error)
+                return
+            await interaction.edit_original_response(
+                content=f"Pergunta `#{result.id}` adicionada na posição {result.position}."
+            )
+
+        @questions.command(name="editar", description="Edita uma pergunta existente")
+        @app_commands.describe(
+            pergunta="Pergunta que será editada",
+            texto="Novo texto da pergunta",
+            obrigatoria="Se a resposta será obrigatória",
+        )
+        async def edit_question(
+            interaction: discord.Interaction,
+            pergunta: int,
+            texto: str,
+            obrigatoria: bool,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                result = await question_service.edit_question(
+                    actor=actor_from_interaction(interaction),
+                    question_id=pergunta,
+                    text=texto,
+                    required=obrigatoria,
+                )
+            except (ApplicationError, ValueError) as error:
+                await respond_error(interaction, error)
+                return
+            await interaction.edit_original_response(content=f"Pergunta `#{result.id}` atualizada.")
+
+        @questions.command(name="mover", description="Altera a ordem de uma pergunta")
+        @app_commands.describe(
+            pergunta="Pergunta que será movida",
+            posicao="Nova posição da pergunta",
+        )
+        async def move_question(
+            interaction: discord.Interaction, pergunta: int, posicao: int
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                result = await question_service.move_question(
+                    actor=actor_from_interaction(interaction),
+                    question_id=pergunta,
+                    position=posicao,
+                )
+            except (ApplicationError, ValueError) as error:
+                await respond_error(interaction, error)
+                return
+            await interaction.edit_original_response(content=_format_questions(result))
+
+        async def change_active(
+            interaction: discord.Interaction, pergunta: int, *, active: bool
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                result = await question_service.set_question_active(
+                    actor=actor_from_interaction(interaction),
+                    question_id=pergunta,
+                    active=active,
+                )
+            except (ApplicationError, ValueError) as error:
+                await respond_error(interaction, error)
+                return
+            state = "ativada" if result.active else "desativada"
+            await interaction.edit_original_response(content=f"Pergunta `#{result.id}` {state}.")
+
+        @questions.command(name="ativar", description="Ativa uma pergunta")
+        async def activate_question(interaction: discord.Interaction, pergunta: int) -> None:
+            await change_active(interaction, pergunta, active=True)
+
+        @questions.command(name="desativar", description="Desativa uma pergunta")
+        async def deactivate_question(interaction: discord.Interaction, pergunta: int) -> None:
+            await change_active(interaction, pergunta, active=False)
+
+        async def question_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[int]]:
+            try:
+                available = await question_service.list_questions(
+                    actor=actor_from_interaction(interaction)
+                )
+            except Exception:
+                return []
+            query = current.casefold().strip()
+            matching = (
+                question
+                for question in available
+                if not query or query in question.text.casefold() or query in str(question.id)
+            )
+            return [
+                app_commands.Choice(
+                    name=f"#{question.id} · {question.text}"[:100],
+                    value=question.id,
+                )
+                for question in list(matching)[:25]
+            ]
+
+        edit_question.autocomplete("pergunta")(question_autocomplete)
+        move_question.autocomplete("pergunta")(question_autocomplete)
+        activate_question.autocomplete("pergunta")(question_autocomplete)
+        deactivate_question.autocomplete("pergunta")(question_autocomplete)
+        config.add_command(questions)
     return config
 
 
@@ -198,7 +351,8 @@ def register_config_commands(
     tree: app_commands.CommandTree[discord.Client],
     service: GuildAdminPresentationService,
     schedule_service: SchedulePresentationService,
+    question_service: QuestionPresentationService,
 ) -> None:
     """Register the config group on a command tree."""
 
-    tree.add_command(build_config_group(service, schedule_service))
+    tree.add_command(build_config_group(service, schedule_service, question_service))

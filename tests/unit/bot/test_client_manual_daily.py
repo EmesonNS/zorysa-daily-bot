@@ -9,6 +9,7 @@ def _bot() -> ZorysaBot:
         app_name="Zorysa Daily Bot",
         guild_admin_service=MagicMock(),
         schedule_service=MagicMock(),
+        question_service=MagicMock(),
         project_service=MagicMock(),
         daily_service=MagicMock(),
     )
