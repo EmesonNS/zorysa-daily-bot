@@ -1,0 +1,147 @@
+from datetime import UTC, datetime, time
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from app.application.dto import ScheduleSummary
+from app.infrastructure.scheduler.planner import (
+    RecoveryAction,
+    ScheduleStage,
+    plan_schedule,
+)
+
+
+def _schedule(
+    *,
+    timezone: str = "America/Belem",
+    execution_days: tuple[int, ...] = (0, 1, 2, 3, 4),
+    daily_enabled: bool = True,
+) -> ScheduleSummary:
+    return ScheduleSummary(
+        timezone=timezone,
+        daily_enabled=daily_enabled,
+        execution_days=execution_days,
+        opening=time(9, 0),
+        first_reminder=time(10, 30),
+        last_reminder=time(11, 30),
+        closing=time(12, 0),
+    )
+
+
+def _local_datetime(
+    year: int,
+    month: int,
+    day: int,
+    hour: int,
+    minute: int = 0,
+    *,
+    timezone: str = "America/Belem",
+) -> datetime:
+    return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(timezone))
+
+
+def test_plan_builds_four_cron_triggers_with_configured_timezone_days_and_times() -> None:
+    schedule = _schedule(execution_days=(0, 2, 4))
+
+    plan = plan_schedule(schedule, _local_datetime(2026, 8, 19, 8))
+
+    assert tuple(job.stage for job in plan.jobs) == (
+        ScheduleStage.OPEN,
+        ScheduleStage.FIRST_REMINDER,
+        ScheduleStage.LAST_REMINDER,
+        ScheduleStage.CLOSE,
+    )
+    assert tuple(str(job.trigger.timezone) for job in plan.jobs) == (
+        "America/Belem",
+        "America/Belem",
+        "America/Belem",
+        "America/Belem",
+    )
+
+    expected = (
+        datetime(2026, 8, 19, 9, 0, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 19, 10, 30, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 19, 11, 30, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 19, 12, 0, tzinfo=ZoneInfo("America/Belem")),
+    )
+    now = _local_datetime(2026, 8, 19, 8)
+    assert tuple(job.trigger.get_next_fire_time(None, now) for job in plan.jobs) == expected
+
+
+def test_trigger_keeps_local_hour_across_daylight_saving_transition() -> None:
+    schedule = _schedule(timezone="America/New_York")
+    now = datetime(2026, 3, 6, 15, 0, tzinfo=UTC)
+
+    plan = plan_schedule(schedule, now)
+    opening = plan.jobs[0].trigger.get_next_fire_time(None, now)
+
+    assert opening == datetime(2026, 3, 9, 9, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert opening is not None
+    assert opening.astimezone(UTC) == datetime(2026, 3, 9, 13, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("now", "expected_actions"),
+    [
+        (_local_datetime(2026, 8, 19, 8, 59), ()),
+        (_local_datetime(2026, 8, 19, 9, 0), (RecoveryAction.ENSURE_OPEN,)),
+        (_local_datetime(2026, 8, 19, 10, 31), (RecoveryAction.ENSURE_OPEN,)),
+        (_local_datetime(2026, 8, 19, 11, 31), (RecoveryAction.ENSURE_OPEN,)),
+        (_local_datetime(2026, 8, 19, 11, 59), (RecoveryAction.ENSURE_OPEN,)),
+        (_local_datetime(2026, 8, 19, 12, 0), (RecoveryAction.CLOSE_OVERDUE,)),
+        (_local_datetime(2026, 8, 19, 12, 1), (RecoveryAction.CLOSE_OVERDUE,)),
+    ],
+)
+def test_recovery_actions_follow_open_and_close_boundaries(
+    now: datetime,
+    expected_actions: tuple[RecoveryAction, ...],
+) -> None:
+    plan = plan_schedule(_schedule(), now)
+
+    assert plan.local_date == now.date()
+    assert plan.recovery_actions == expected_actions
+    assert not {
+        ScheduleStage.FIRST_REMINDER,
+        ScheduleStage.LAST_REMINDER,
+    }.intersection(action.value for action in plan.recovery_actions)
+
+
+def test_recovery_does_not_open_on_disabled_weekday() -> None:
+    saturday = _local_datetime(2026, 8, 22, 10, 0)
+
+    plan = plan_schedule(_schedule(), saturday)
+
+    assert saturday.weekday() == 5
+    assert plan.recovery_actions == ()
+
+
+def test_recovery_after_close_can_close_overdue_sessions_on_disabled_weekday() -> None:
+    saturday = _local_datetime(2026, 8, 22, 12, 1)
+
+    plan = plan_schedule(_schedule(), saturday)
+
+    assert plan.recovery_actions == (RecoveryAction.CLOSE_OVERDUE,)
+
+
+def test_disabled_schedule_has_no_recurring_jobs_or_open_recovery() -> None:
+    plan = plan_schedule(
+        _schedule(daily_enabled=False),
+        _local_datetime(2026, 8, 19, 10, 0),
+    )
+
+    assert plan.jobs == ()
+    assert plan.recovery_actions == ()
+
+
+def test_planner_converts_aware_now_to_guild_timezone() -> None:
+    now_utc = datetime(2026, 8, 19, 12, 30, tzinfo=UTC)
+
+    plan = plan_schedule(_schedule(), now_utc)
+
+    assert plan.local_date.isoformat() == "2026-08-19"
+    assert plan.recovery_actions == (RecoveryAction.ENSURE_OPEN,)
+
+
+def test_planner_rejects_naive_now() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        plan_schedule(_schedule(), datetime(2026, 8, 19, 9, 0))
