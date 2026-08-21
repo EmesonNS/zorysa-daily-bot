@@ -3,6 +3,7 @@
 from app.infrastructure.database.core import Database, DatabaseUnavailableError
 from app.infrastructure.database.models import (
     AdminRole,
+    AuditEvent,
     Base,
     DailyAnswer,
     DailyAssignment,
@@ -17,10 +18,12 @@ from app.infrastructure.database.models import (
     Project,
     ProjectMembership,
     ReportChannel,
+    ReportDelivery,
 )
 
 __all__ = [
     "AdminRole",
+    "AuditEvent",
     "Base",
     "DailyAnswer",
     "DailyAssignment",
@@ -37,4 +40,5 @@ __all__ = [
     "Project",
     "ProjectMembership",
     "ReportChannel",
+    "ReportDelivery",
 ]

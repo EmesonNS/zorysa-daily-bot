@@ -19,14 +19,23 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    desc,
     func,
 )
 from sqlalchemy import (
     text as sql_text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, synonym, validates
 
-from app.domain.enums import AssignmentStatus, NotificationKind, ProjectStatus, SessionStatus
+from app.domain.enums import (
+    AssignmentStatus,
+    AuditAction,
+    NotificationKind,
+    ProjectStatus,
+    ReportKind,
+    SessionStatus,
+)
 
 
 class Base(DeclarativeBase):
@@ -90,7 +99,10 @@ class Guild(TimestampMixin, Base):
     report_channels: Mapped[list["ReportChannel"]] = relationship(
         back_populates="guild", cascade="all, delete-orphan"
     )
-    report_deliveries: Mapped[list["DailyReportDelivery"]] = relationship(
+    report_deliveries: Mapped[list["ReportDelivery"]] = relationship(
+        back_populates="guild", cascade="all, delete-orphan"
+    )
+    audit_events: Mapped[list["AuditEvent"]] = relationship(
         back_populates="guild", cascade="all, delete-orphan"
     )
 
@@ -99,6 +111,12 @@ class GuildSettings(TimestampMixin, Base):
     """Per-guild operational settings."""
 
     __tablename__ = "guild_settings"
+    __table_args__ = (
+        CheckConstraint(
+            "weekly_report_weekday >= 0 AND weekly_report_weekday <= 6",
+            name="valid_weekly_report_weekday",
+        ),
+    )
 
     guild_id: Mapped[int] = mapped_column(
         ForeignKey("guilds.id", ondelete="CASCADE"), primary_key=True
@@ -123,6 +141,15 @@ class GuildSettings(TimestampMixin, Base):
     )
     daily_report_time: Mapped[time] = mapped_column(
         Time, nullable=False, server_default=sql_text("'12:10:00'")
+    )
+    weekly_report_weekday: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=sql_text("4")
+    )
+    weekly_report_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'12:20:00'")
+    )
+    monthly_report_time: Mapped[time] = mapped_column(
+        Time, nullable=False, server_default=sql_text("'12:20:00'")
     )
 
     guild: Mapped[Guild] = relationship(back_populates="settings")
@@ -170,27 +197,84 @@ class ReportChannel(TimestampMixin, Base):
     guild: Mapped[Guild] = relationship(back_populates="report_channels")
 
 
-class DailyReportDelivery(TimestampMixin, Base):
-    """Idempotent publication marker for one guild, local date, and channel."""
+class ReportDelivery(TimestampMixin, Base):
+    """Idempotent automatic report publication for one guild period and channel."""
 
-    __tablename__ = "daily_report_deliveries"
+    __tablename__ = "report_deliveries"
     __table_args__ = (
         UniqueConstraint(
             "guild_id",
-            "report_date",
+            "kind",
+            "period_start",
+            "period_end",
             "discord_channel_id",
-            name="uq_daily_report_deliveries_guild_date_channel",
+            name="uq_report_deliveries_guild_kind_period_channel",
         ),
+        CheckConstraint("period_end >= period_start", name="valid_period"),
     )
 
     id: Mapped[PrimaryKey]
     guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"))
-    report_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[ReportKind] = mapped_column(
+        Enum(
+            ReportKind,
+            name="report_kind",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=ReportKind.DAILY,
+        server_default=sql_text("'DAILY'"),
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
     discord_channel_id: Mapped[DiscordId]
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     page_count: Mapped[int | None] = mapped_column(Integer)
 
     guild: Mapped[Guild] = relationship(back_populates="report_deliveries")
+    report_date: Mapped[date] = synonym("period_start")
+
+    @validates("period_start")
+    def _default_daily_period_end(self, _key: str, value: date) -> date:
+        if getattr(self, "kind", None) is None:
+            self.kind = ReportKind.DAILY
+        if getattr(self, "period_end", None) is None:
+            self.period_end = value
+        return value
+
+
+DailyReportDelivery = ReportDelivery
+
+
+class AuditEvent(Base):
+    """Append-only record of one administrative or system action."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index(
+            "ix_audit_events_guild_occurred_id",
+            "guild_id",
+            desc("occurred_at"),
+            desc("id"),
+        ),
+        Index("ix_audit_events_guild_actor", "guild_id", "actor_user_id"),
+        Index("ix_audit_events_guild_action", "guild_id", "action"),
+    )
+
+    id: Mapped[PrimaryKey]
+    guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"))
+    actor_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    action: Mapped[AuditAction] = mapped_column(String(64), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[DiscordId]
+    details: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")
+    )
+    occurred_at: Mapped[Timestamp]
+
+    guild: Mapped[Guild] = relationship(back_populates="audit_events")
 
 
 class AdminRole(TimestampMixin, Base):

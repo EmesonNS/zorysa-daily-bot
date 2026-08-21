@@ -1,19 +1,27 @@
+from datetime import date
+
 from sqlalchemy import CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 
+import app.domain as domain
+import app.infrastructure.database as database
 from app.domain.enums import (
     AssignmentStatus,
+    AuditAction,
     NotificationKind,
     ProjectStatus,
+    ReportKind,
     SessionStatus,
 )
 from app.infrastructure.database.models import (
+    AuditEvent,
     Base,
     DailyAssignment,
     GuildExecutionDay,
     GuildSettings,
     ProjectMembership,
     ReportChannel,
+    ReportDelivery,
 )
 
 
@@ -32,7 +40,8 @@ def test_manual_daily_metadata_contains_all_expected_tables() -> None:
         "project_memberships",
         "projects",
         "report_channels",
-        "daily_report_deliveries",
+        "report_deliveries",
+        "audit_events",
     }
 
 
@@ -138,12 +147,12 @@ def test_report_channel_is_unique_per_guild() -> None:
     )
 
 
-def test_report_delivery_is_unique_per_guild_date_and_channel() -> None:
-    constraints = Base.metadata.tables["daily_report_deliveries"].constraints
+def test_report_delivery_is_unique_per_kind_period_and_channel() -> None:
+    constraints = Base.metadata.tables["report_deliveries"].constraints
 
     assert any(
         isinstance(constraint, UniqueConstraint)
-        and constraint.name == "uq_daily_report_deliveries_guild_date_channel"
+        and constraint.name == "uq_report_deliveries_guild_kind_period_channel"
         for constraint in constraints
     )
 
@@ -175,3 +184,94 @@ def test_report_channel_flags_have_daily_only_defaults() -> None:
     assert str(columns.daily_enabled.server_default.arg) == "true"
     assert str(columns.weekly_enabled.server_default.arg) == "false"
     assert str(columns.monthly_enabled.server_default.arg) == "false"
+
+
+def test_historical_domain_enums_use_stable_values() -> None:
+    assert [kind.value for kind in ReportKind] == ["DAILY", "WEEKLY", "MONTHLY"]
+    assert [action.value for action in AuditAction] == [
+        "PROJECT_CREATED",
+        "PROJECT_EDITED",
+        "PROJECT_ARCHIVED",
+        "MEMBER_ADDED",
+        "MEMBER_REMOVED",
+        "MEMBER_LEFT_GUILD",
+        "SCHEDULE_UPDATED",
+        "QUESTION_ADDED",
+        "QUESTION_EDITED",
+        "QUESTION_MOVED",
+        "QUESTION_ACTIVATED",
+        "QUESTION_DEACTIVATED",
+        "ADMIN_ROLE_ADDED",
+        "ADMIN_ROLE_REMOVED",
+        "REPORT_CHANNEL_SAVED",
+        "REPORT_CHANNEL_REMOVED",
+        "ABSENCE_JUSTIFIED",
+        "DAILY_CLOSED_MANUALLY",
+        "MANUAL_REPORT_REQUESTED",
+    ]
+
+
+def test_management_schedule_has_expected_defaults_and_constraints() -> None:
+    table = GuildSettings.__table__
+    columns = table.columns
+
+    assert str(columns.weekly_report_weekday.server_default.arg) == "4"
+    assert str(columns.weekly_report_time.server_default.arg) == "'12:20:00'"
+    assert str(columns.monthly_report_time.server_default.arg) == "'12:20:00'"
+    assert type(columns.weekly_report_time.type).__name__ == "Time"
+    assert type(columns.monthly_report_time.type).__name__ == "Time"
+    assert any(
+        isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_guild_settings_valid_weekly_report_weekday"
+        and str(constraint.sqltext) == ("weekly_report_weekday >= 0 AND weekly_report_weekday <= 6")
+        for constraint in table.constraints
+    )
+
+
+def test_report_delivery_declares_kind_period_and_compatibility_alias() -> None:
+    table = ReportDelivery.__table__
+
+    assert {
+        "kind",
+        "period_start",
+        "period_end",
+        "discord_channel_id",
+        "sent_at",
+        "page_count",
+    }.issubset(table.columns.keys())
+    assert any(
+        isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_report_deliveries_valid_period"
+        and str(constraint.sqltext) == "period_end >= period_start"
+        for constraint in table.constraints
+    )
+    delivery = database.DailyReportDelivery(report_date=date(2026, 8, 21))
+    assert delivery.kind == ReportKind.DAILY
+    assert delivery.period_start == date(2026, 8, 21)
+    assert delivery.period_end == date(2026, 8, 21)
+
+
+def test_audit_event_has_safe_typed_columns() -> None:
+    columns = AuditEvent.__table__.columns
+
+    assert columns.actor_user_id.nullable is True
+    assert columns.target_id.nullable is False
+    assert columns.occurred_at.nullable is False
+    assert isinstance(columns.details.type, postgresql.JSONB)
+
+
+def test_audit_event_has_query_indexes() -> None:
+    indexes = {index.name: index for index in AuditEvent.__table__.indexes}
+
+    assert {
+        "ix_audit_events_guild_occurred_id",
+        "ix_audit_events_guild_actor",
+        "ix_audit_events_guild_action",
+    } <= indexes.keys()
+
+
+def test_historical_models_and_enums_are_publicly_exported() -> None:
+    assert domain.ReportKind is ReportKind
+    assert domain.AuditAction is AuditAction
+    assert database.ReportDelivery is ReportDelivery
+    assert database.AuditEvent is AuditEvent
