@@ -39,6 +39,14 @@ class MemberSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectDetails:
+    summary: ProjectSummary
+    active_members: tuple[MemberSummary, ...]
+    membership_count: int
+    session_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class QuestionSummary:
     id: int
     text: str

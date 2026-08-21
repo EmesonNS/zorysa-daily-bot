@@ -23,3 +23,22 @@ async def test_project_slug_rejects_name_without_ascii_identifier() -> None:
     with pytest.raises(ValidationError, match="nome de projeto válido"):
         # Validation happens before a database session is opened.
         await service.create_project(actor=actor, name="---", channel_id=3)
+
+
+@pytest.mark.parametrize(
+    ("name", "channel_id"),
+    [("", 3), ("x" * 101, 3), ("Projeto", 0)],
+)
+async def test_project_edit_validates_input_before_database_access(
+    name: str, channel_id: int
+) -> None:
+    service = ProjectService(None)  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
+        await service.edit_project(
+            actor=ActorContext(1, "Guild", 2, (), True, True),
+            project_slug="projeto",
+            name=name,
+            channel_id=channel_id,
+            daily_enabled=True,
+        )
