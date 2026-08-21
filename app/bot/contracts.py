@@ -203,6 +203,32 @@ class DailyPresentationService(Protocol):
     ) -> DailyPanel: ...
 
 
+class DailyManagementPresentationService(Protocol):
+    """Public status and authorized closure consumed by `/daily`."""
+
+    async def status(
+        self,
+        *,
+        discord_guild_id: int,
+        project_slug: str,
+        local_date: date | None,
+    ) -> DailyPanel: ...
+
+    async def close(
+        self,
+        *,
+        actor: ActorContext,
+        project_slug: str,
+        local_date: date | None,
+    ) -> ClosedDaily: ...
+
+
+class DailyClosureGateway(Protocol):
+    """Discord panel update required after manual closure."""
+
+    async def publish_closed(self, closed: ClosedDaily) -> None: ...
+
+
 class AbsencePresentationService(Protocol):
     async def justify(
         self,
@@ -222,6 +248,8 @@ __all__ = [
     "ApplicationError",
     "ClosedDaily",
     "DailyPanel",
+    "DailyClosureGateway",
+    "DailyManagementPresentationService",
     "DailyParticipant",
     "DailyPresentationService",
     "DailyResponseForm",

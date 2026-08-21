@@ -53,7 +53,7 @@ async def test_public_status_and_manual_close_are_private_scoped_and_idempotent(
 
     service = DailyManagementService(daily_management_context, clock=lambda: opened_at)
     panel = await service.status(
-        discord_guild_id=actor.guild_id, project_slug="zorysa", local_date=TODAY
+        discord_guild_id=actor.guild_id, project_slug="zorysa", local_date=None
     )
     assert panel == opened.panel
     assert "answer" not in repr(panel).casefold()

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -13,7 +14,7 @@ from app.application.dto import ActorContext
 from app.application.errors import NotFoundError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
 from app.domain.enums import AuditAction
-from app.infrastructure.database.models import DailySession, Guild, Project
+from app.infrastructure.database.models import DailySession, Guild, GuildSettings, Project
 
 
 class DailyManagementService:
@@ -35,17 +36,18 @@ class DailyManagementService:
         *,
         discord_guild_id: int,
         project_slug: str,
-        local_date: date,
+        local_date: date | None,
     ) -> DailyPanel:
         """Return the answer-free panel without requiring administrative access."""
 
         slug = self._validate_scope(discord_guild_id, project_slug)
         async with self._sessions() as session:
+            selected_date = local_date or await self._local_date(session, discord_guild_id)
             row = await self._daily_row(
                 session,
                 discord_guild_id=discord_guild_id,
                 project_slug=slug,
-                local_date=local_date,
+                local_date=selected_date,
             )
             if row is None:
                 raise NotFoundError("Daily não encontrada para o projeto e a data informados.")
@@ -57,18 +59,19 @@ class DailyManagementService:
         *,
         actor: ActorContext,
         project_slug: str,
-        local_date: date,
+        local_date: date | None,
     ) -> ClosedDaily:
         """Close one daily idempotently and audit only its first state transition."""
 
         slug = self._validate_scope(actor.guild_id, project_slug)
         async with self._sessions() as session, session.begin():
             guild = await self._authorized_guild(session, actor)
+            selected_date = local_date or await self._local_date(session, actor.guild_id)
             row = await self._daily_row(
                 session,
                 discord_guild_id=actor.guild_id,
                 project_slug=slug,
-                local_date=local_date,
+                local_date=selected_date,
                 lock=True,
             )
             if row is None:
@@ -135,6 +138,14 @@ class DailyManagementService:
         if discord_guild_id <= 0 or not slug:
             raise ValidationError("Informe um servidor e um projeto válidos.")
         return slug
+
+    async def _local_date(self, session: AsyncSession, discord_guild_id: int) -> date:
+        timezone = await session.scalar(
+            select(GuildSettings.timezone)
+            .join(Guild, Guild.id == GuildSettings.guild_id)
+            .where(Guild.discord_guild_id == discord_guild_id)
+        )
+        return self._now().astimezone(ZoneInfo(timezone or self._timezone)).date()
 
     def _now(self) -> datetime:
         value = self._clock()
