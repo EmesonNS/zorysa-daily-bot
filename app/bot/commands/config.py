@@ -1,11 +1,17 @@
 """Administrative role Slash Commands."""
 
+from datetime import UTC, date, datetime, time
+
 import discord
 from discord import app_commands
 
 from app.bot.commands.common import actor_from_interaction
 from app.bot.contracts import (
     ApplicationError,
+    AuditCursor,
+    AuditFilters,
+    AuditPage,
+    AuditPresentationService,
     GuildAdminPresentationService,
     QuestionPresentationService,
     QuestionSummary,
@@ -14,6 +20,7 @@ from app.bot.contracts import (
     SchedulePresentationService,
     ScheduleSummary,
 )
+from app.domain.enums import AuditAction
 
 _WEEKDAYS = (
     "Segunda-feira",
@@ -27,12 +34,17 @@ _WEEKDAYS = (
 _WEEKDAY_CHOICES = [
     app_commands.Choice(name=name, value=value) for value, name in enumerate(_WEEKDAYS)
 ]
+_AUDIT_ACTION_CHOICES = [
+    app_commands.Choice(name=action.value.replace("_", " ").title(), value=action.value)
+    for action in AuditAction
+]
 
 
 def _format_schedule(schedule: ScheduleSummary) -> str:
     status = "Ativa" if schedule.daily_enabled else "Desativada"
     days = ", ".join(_WEEKDAYS[weekday] for weekday in schedule.execution_days)
     opening, first, last, closing, reporting = schedule.formatted_times
+    weekly_weekday, weekly_reporting, monthly_reporting = schedule.formatted_management_reports
     return (
         f"**Agenda automática:** {status}\n"
         f"**Timezone:** `{schedule.timezone}`\n"
@@ -41,8 +53,49 @@ def _format_schedule(schedule: ScheduleSummary) -> str:
         f"**Primeiro lembrete:** {first}\n"
         f"**Último lembrete:** {last}\n"
         f"**Fechamento:** {closing}\n"
-        f"**Relatório:** {reporting}"
+        f"**Relatório:** {reporting}\n"
+        f"Semanal: {_WEEKDAYS[weekly_weekday]} às {weekly_reporting}\n"
+        f"Mensal: {monthly_reporting}"
     )
+
+
+def _parse_optional_date(value: str | None, *, end_of_day: bool) -> datetime | None:
+    if value is None or not value.strip():
+        return None
+    parsed = date.fromisoformat(value.strip())
+    boundary = time.max if end_of_day else time.min
+    return datetime.combine(parsed, boundary, tzinfo=UTC)
+
+
+def _parse_audit_cursor(value: str | None) -> AuditCursor | None:
+    if value is None or not value.strip():
+        return None
+    timestamp_text, event_id_text = value.strip().rsplit("|", maxsplit=1)
+    timestamp = datetime.fromisoformat(timestamp_text)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    event_id = int(event_id_text)
+    if event_id <= 0:
+        raise ValueError("cursor inválido")
+    return AuditCursor(timestamp.astimezone(UTC), event_id)
+
+
+def _format_audit_page(page: AuditPage) -> str:
+    if not page.events:
+        return "Nenhum evento de auditoria encontrado."
+
+    lines = []
+    for event in page.events:
+        occurred_at = event.occurred_at.astimezone(UTC).strftime("%d/%m/%Y %H:%M UTC")
+        actor = f"<@{event.actor_user_id}>" if event.actor_user_id else "sistema"
+        lines.append(
+            f"`#{event.id}` • {occurred_at} • {event.action.value} • {actor} • "
+            f"{event.target_type} #{event.target_id}"
+        )
+    if page.next_cursor is not None:
+        token = f"{page.next_cursor.occurred_at.isoformat()}|{page.next_cursor.event_id}"
+        lines.extend(("", f"Próximo cursor: `{token}`"))
+    return "\n".join(lines)
 
 
 def _format_questions(questions: tuple[QuestionSummary, ...]) -> str:
@@ -75,6 +128,7 @@ def build_config_group(
     schedule_service: SchedulePresentationService | None = None,
     question_service: QuestionPresentationService | None = None,
     report_channel_service: ReportChannelPresentationService | None = None,
+    audit_service: AuditPresentationService | None = None,
 ) -> app_commands.Group:
     """Build `/config admin` commands using an injected application service."""
 
@@ -187,6 +241,32 @@ def build_config_group(
             try:
                 schedule = await schedule_service.update_timezone(
                     actor=actor_from_interaction(interaction), timezone=valor
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_schedule(schedule))
+
+        @agenda.command(name="relatorios", description="Altera a agenda dos relatórios históricos")
+        @app_commands.choices(dia_semanal=_WEEKDAY_CHOICES)
+        @app_commands.rename(
+            dia_semanal="dia-semanal",
+            horario_semanal="horario-semanal",
+            horario_mensal="horario-mensal",
+        )
+        async def update_management_report_schedule(
+            interaction: discord.Interaction,
+            dia_semanal: app_commands.Choice[int],
+            horario_semanal: str,
+            horario_mensal: str,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                schedule = await schedule_service.update_management_reports(
+                    actor=actor_from_interaction(interaction),
+                    weekly_weekday=dia_semanal.value,
+                    weekly_reporting=horario_semanal,
+                    monthly_reporting=horario_mensal,
                 )
             except (ApplicationError, ValueError) as error:
                 await interaction.edit_original_response(content=str(error))
@@ -421,6 +501,68 @@ def build_config_group(
             )
 
         config.add_command(reports)
+    if audit_service is not None:
+        audit = app_commands.Group(name="auditoria", description="Histórico administrativo")
+
+        @audit.command(name="listar", description="Consulta eventos de auditoria")
+        @app_commands.choices(acao=_AUDIT_ACTION_CHOICES)
+        @app_commands.rename(alvo_tipo="alvo-tipo", alvo_id="alvo-id")
+        @app_commands.describe(
+            acao="Ação administrativa",
+            ator="Usuário que executou a ação",
+            alvo_tipo="Tipo do recurso afetado",
+            alvo_id="ID do recurso afetado",
+            inicio="Data inicial em AAAA-MM-DD",
+            fim="Data final em AAAA-MM-DD",
+            cursor="Cursor retornado pela página anterior",
+        )
+        async def list_audit_events(
+            interaction: discord.Interaction,
+            acao: str | None = None,
+            ator: discord.Member | None = None,
+            alvo_tipo: str | None = None,
+            alvo_id: str | None = None,
+            inicio: str | None = None,
+            fim: str | None = None,
+            cursor: str | None = None,
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            try:
+                started_at = _parse_optional_date(inicio, end_of_day=False)
+                ended_at = _parse_optional_date(fim, end_of_day=True)
+                if started_at is not None and ended_at is not None and started_at > ended_at:
+                    raise ValueError("intervalo inválido")
+                parsed_target_id = int(alvo_id) if alvo_id and alvo_id.strip() else None
+                if parsed_target_id is not None and parsed_target_id <= 0:
+                    raise ValueError("alvo inválido")
+                filters = AuditFilters(
+                    action=AuditAction(acao) if acao else None,
+                    actor_user_id=ator.id if ator else None,
+                    target_type=alvo_tipo.strip() if alvo_tipo and alvo_tipo.strip() else None,
+                    target_id=parsed_target_id,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                )
+                parsed_cursor = _parse_audit_cursor(cursor)
+            except (TypeError, ValueError):
+                await interaction.edit_original_response(
+                    content="Informe filtros e cursor válidos para a auditoria."
+                )
+                return
+
+            try:
+                page = await audit_service.list_events(
+                    actor=actor_from_interaction(interaction),
+                    filters=filters,
+                    cursor=parsed_cursor,
+                    limit=10,
+                )
+            except (ApplicationError, ValueError) as error:
+                await interaction.edit_original_response(content=str(error))
+                return
+            await interaction.edit_original_response(content=_format_audit_page(page))
+
+        config.add_command(audit)
     return config
 
 
@@ -430,9 +572,16 @@ def register_config_commands(
     schedule_service: SchedulePresentationService,
     question_service: QuestionPresentationService,
     report_channel_service: ReportChannelPresentationService,
+    audit_service: AuditPresentationService | None = None,
 ) -> None:
     """Register the config group on a command tree."""
 
     tree.add_command(
-        build_config_group(service, schedule_service, question_service, report_channel_service)
+        build_config_group(
+            service,
+            schedule_service,
+            question_service,
+            report_channel_service,
+            audit_service,
+        )
     )

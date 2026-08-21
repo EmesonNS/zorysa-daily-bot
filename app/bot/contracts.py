@@ -20,6 +20,10 @@ from app.application.daily_dto import (
 from app.application.dto import (
     ActorContext,
     AdminRoleSummary,
+    AuditCursor,
+    AuditEventSummary,
+    AuditFilters,
+    AuditPage,
     MemberSummary,
     ProjectDetails,
     ProjectSummary,
@@ -67,6 +71,28 @@ class SchedulePresentationService(Protocol):
     async def remove_execution_day(
         self, *, actor: ActorContext, weekday: int
     ) -> ScheduleSummary: ...
+
+    async def update_management_reports(
+        self,
+        *,
+        actor: ActorContext,
+        weekly_weekday: int,
+        weekly_reporting: str,
+        monthly_reporting: str,
+    ) -> ScheduleSummary: ...
+
+
+class AuditPresentationService(Protocol):
+    """Read-only audit operations consumed by `/config auditoria`."""
+
+    async def list_events(
+        self,
+        *,
+        actor: ActorContext,
+        filters: AuditFilters | None = None,
+        cursor: AuditCursor | None = None,
+        limit: int = 25,
+    ) -> AuditPage: ...
 
 
 class QuestionPresentationService(Protocol):
@@ -246,6 +272,11 @@ __all__ = [
     "AbsencePresentationService",
     "AdminRoleSummary",
     "ApplicationError",
+    "AuditCursor",
+    "AuditEventSummary",
+    "AuditFilters",
+    "AuditPage",
+    "AuditPresentationService",
     "ClosedDaily",
     "DailyPanel",
     "DailyClosureGateway",

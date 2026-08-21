@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import UTC, datetime, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,10 +8,14 @@ from app.application.errors import ConflictError
 from app.bot.commands.config import build_config_group
 from app.bot.contracts import (
     AdminRoleSummary,
+    AuditCursor,
+    AuditEventSummary,
+    AuditPage,
     QuestionSummary,
     ReportChannelSummary,
     ScheduleSummary,
 )
+from app.domain.enums import AuditAction
 
 
 def _interaction() -> MagicMock:
@@ -56,6 +60,14 @@ def _report_command(group: app_commands.Group, name: str) -> app_commands.Comman
     reports = group.get_command("relatorios")
     assert isinstance(reports, app_commands.Group)
     command = reports.get_command(name)
+    assert isinstance(command, app_commands.Command)
+    return command
+
+
+def _audit_command(group: app_commands.Group, name: str) -> app_commands.Command:
+    audit = group.get_command("auditoria")
+    assert isinstance(audit, app_commands.Group)
+    command = audit.get_command(name)
     assert isinstance(command, app_commands.Command)
     return command
 
@@ -137,6 +149,8 @@ async def test_view_schedule_formats_days_times_and_timezone_ephemerally() -> No
     assert "Segunda" in content and "Sexta" in content
     assert "09:00" in content and "12:00" in content
     assert "**Relatório:** 12:10" in content
+    assert "Sexta-feira às 12:20" in content
+    assert "Mensal: 12:20" in content
 
 
 async def test_update_schedule_times_passes_all_values() -> None:
@@ -179,6 +193,110 @@ async def test_schedule_day_commands_use_discord_choices() -> None:
     interaction.response.defer.reset_mock()
     await _agenda_command(group, "dia-remover").callback(interaction, choice)
     assert schedule_service.remove_execution_day.await_args.kwargs["weekday"] == 6
+
+
+async def test_update_management_report_schedule_passes_weekday_and_times() -> None:
+    schedule_service = MagicMock(update_management_reports=AsyncMock(return_value=_schedule()))
+    interaction = _interaction()
+    command = _agenda_command(build_config_group(MagicMock(), schedule_service), "relatorios")
+    friday = app_commands.Choice(name="Sexta-feira", value=4)
+
+    await command.callback(interaction, friday, "13:00", "14:00")
+
+    assert schedule_service.update_management_reports.await_args.kwargs == {
+        "actor": schedule_service.update_management_reports.await_args.kwargs["actor"],
+        "weekly_weekday": 4,
+        "weekly_reporting": "13:00",
+        "monthly_reporting": "14:00",
+    }
+
+
+def _audit_page(*, next_cursor: bool = True) -> AuditPage:
+    occurred_at = datetime(2026, 8, 21, 15, 30, tzinfo=UTC)
+    return AuditPage(
+        events=(
+            AuditEventSummary(
+                id=9,
+                guild_id=123,
+                actor_user_id=10,
+                action=AuditAction.PROJECT_EDITED,
+                target_type="project",
+                target_id=77,
+                details={"secret": "não exibir", "name": "interno"},
+                occurred_at=occurred_at,
+            ),
+        ),
+        next_cursor=AuditCursor(occurred_at, 9) if next_cursor else None,
+    )
+
+
+async def test_audit_list_parses_filters_and_paginates_ephemerally() -> None:
+    audit_service = MagicMock(list_events=AsyncMock(return_value=_audit_page()))
+    interaction = _interaction()
+    actor = SimpleNamespace(id=20)
+    group = build_config_group(MagicMock(), audit_service=audit_service)
+
+    await _audit_command(group, "listar").callback(
+        interaction,
+        AuditAction.PROJECT_EDITED.value,
+        actor,
+        "project",
+        "77",
+        "2026-08-01",
+        "2026-08-21",
+        None,
+    )
+
+    filters = audit_service.list_events.await_args.kwargs["filters"]
+    assert filters.action == AuditAction.PROJECT_EDITED
+    assert filters.actor_user_id == 20
+    assert filters.target_type == "project" and filters.target_id == 77
+    assert filters.started_at == datetime(2026, 8, 1, tzinfo=UTC)
+    assert filters.ended_at.date().isoformat() == "2026-08-21"
+    assert audit_service.list_events.await_args.kwargs["limit"] == 10
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    content = interaction.edit_original_response.await_args.kwargs["content"]
+    assert "PROJECT_EDITED" in content and "<@10>" in content and "project #77" in content
+    assert "Próximo cursor" in content and "2026-08-21T15:30:00+00:00|9" in content
+    assert "secret" not in content and "interno" not in content
+
+
+async def test_audit_list_accepts_cursor_and_shows_empty_state() -> None:
+    audit_service = MagicMock(
+        list_events=AsyncMock(return_value=AuditPage(events=(), next_cursor=None))
+    )
+    interaction = _interaction()
+    group = build_config_group(MagicMock(), audit_service=audit_service)
+
+    await _audit_command(group, "listar").callback(
+        interaction,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "2026-08-21T15:30:00+00:00|9",
+    )
+
+    cursor = audit_service.list_events.await_args.kwargs["cursor"]
+    assert cursor == AuditCursor(datetime(2026, 8, 21, 15, 30, tzinfo=UTC), 9)
+    assert interaction.edit_original_response.await_args.kwargs["content"] == (
+        "Nenhum evento de auditoria encontrado."
+    )
+
+
+async def test_audit_list_rejects_invalid_filter_without_service_call() -> None:
+    audit_service = MagicMock(list_events=AsyncMock())
+    interaction = _interaction()
+    group = build_config_group(MagicMock(), audit_service=audit_service)
+
+    await _audit_command(group, "listar").callback(
+        interaction, None, None, None, "inválido", None, None, None
+    )
+
+    audit_service.list_events.assert_not_awaited()
+    assert "filtros" in interaction.edit_original_response.await_args.kwargs["content"]
 
 
 def _questions() -> tuple[QuestionSummary, ...]:
