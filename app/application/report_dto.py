@@ -47,6 +47,14 @@ class HistoricalReport:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualReport:
+    """Authorized manual report ready for publication in the requested channel."""
+
+    channel_id: int
+    report: HistoricalReport
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedReport:
     """Persisted automatic delivery ready for publication."""
 

@@ -27,6 +27,8 @@ from app.application.dto import (
     ScheduleSummary,
 )
 from app.application.errors import ApplicationError
+from app.application.report_dto import HistoricalReport, ManualReport
+from app.domain.enums import ReportKind
 
 PresentationError = ApplicationError
 
@@ -138,6 +140,32 @@ class ProjectPresentationService(Protocol):
     ) -> tuple[MemberSummary, ...]: ...
 
 
+class ManualReportPresentationService(Protocol):
+    """Authorized manual report workflow consumed by `/relatorio`."""
+
+    async def build_manual(
+        self,
+        *,
+        actor: ActorContext,
+        kind: ReportKind,
+        period_text: str | None,
+        project_slug: str | None,
+        channel_id: int,
+    ) -> ManualReport: ...
+
+
+class ManualReportGateway(Protocol):
+    """Public Discord publication required by the manual report command."""
+
+    async def publish_manual(
+        self,
+        *,
+        channel_id: int,
+        request_id: int,
+        report: HistoricalReport,
+    ) -> int: ...
+
+
 class DailyPresentationService(Protocol):
     """Application operations required by daily Discord interactions."""
 
@@ -176,6 +204,8 @@ __all__ = [
     "DailyResponseForm",
     "GuildAdminPresentationService",
     "MemberSummary",
+    "ManualReportGateway",
+    "ManualReportPresentationService",
     "JustifiedDaily",
     "OpenedDaily",
     "PresentationError",

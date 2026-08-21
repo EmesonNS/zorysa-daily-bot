@@ -3,12 +3,16 @@
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
+from app.application.dto import ActorContext
 from app.application.errors import NotFoundError, ValidationError
+from app.application.guild_admin import authorize_admin, ensure_guild_record
 from app.application.report_dto import (
     DailyReport,
     DailyReportAnswer,
@@ -18,17 +22,19 @@ from app.application.report_dto import (
     HistoricalReport,
     HistoricalReportEntry,
     HistoricalReportProject,
+    ManualReport,
     PreparedReport,
     ReportPeriod,
 )
 from app.application.report_periods import resolve_period
-from app.domain.enums import AssignmentStatus, ReportKind
+from app.domain.enums import AssignmentStatus, AuditAction, ReportKind
 from app.infrastructure.database.models import (
     DailyAnswer,
     DailyAssignment,
     DailyQuestionSnapshot,
     DailySession,
     Guild,
+    GuildSettings,
     Project,
     ReportChannel,
     ReportDelivery,
@@ -103,10 +109,70 @@ class HistoricalReportService:
         self,
         sessions: async_sessionmaker[AsyncSession],
         *,
+        timezone: str = "America/Belem",
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._sessions = sessions
+        self._timezone = timezone
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    async def build_manual(
+        self,
+        *,
+        actor: ActorContext,
+        kind: ReportKind,
+        period_text: str | None,
+        project_slug: str | None,
+        channel_id: int,
+    ) -> ManualReport:
+        """Authorize, build, and audit a repeatable manual report request."""
+
+        if channel_id <= 0:
+            raise ValidationError("O canal atual não permite publicar relatórios.")
+        selected_slug = project_slug.strip().lower() if project_slug else None
+        async with self._sessions() as session, session.begin():
+            guild = await ensure_guild_record(
+                session,
+                discord_guild_id=actor.guild_id,
+                guild_name=actor.guild_name,
+                timezone=self._timezone,
+            )
+            await authorize_admin(session, guild=guild, actor=actor)
+            timezone = await session.scalar(
+                select(GuildSettings.timezone).where(GuildSettings.guild_id == guild.id)
+            )
+            local_today = self._now().astimezone(ZoneInfo(timezone or self._timezone)).date()
+            period = resolve_period(kind, period_text, local_today)
+
+        report = await self.build_report(
+            actor.guild_id,
+            kind,
+            period,
+            project_slug=selected_slug,
+        )
+        async with self._sessions() as session, session.begin():
+            guild = await ensure_guild_record(
+                session,
+                discord_guild_id=actor.guild_id,
+                guild_name=actor.guild_name,
+                timezone=self._timezone,
+            )
+            await authorize_admin(session, guild=guild, actor=actor)
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=AuditAction.MANUAL_REPORT_REQUESTED,
+                target_type="report_channel",
+                target_id=channel_id,
+                details={
+                    "kind": kind.value,
+                    "period_start": period.start.isoformat(),
+                    "period_end": period.end.isoformat(),
+                    "project_slug": selected_slug,
+                },
+            )
+        return ManualReport(channel_id=channel_id, report=report)
 
     async def build_report(
         self,

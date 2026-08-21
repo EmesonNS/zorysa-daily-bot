@@ -5,11 +5,20 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.application.errors import NotFoundError, ValidationError
+from app.application.dto import ActorContext
+from app.application.errors import AuthorizationError, NotFoundError, ValidationError
 from app.application.historical_reports import HistoricalReportService
 from app.application.report_dto import ReportPeriod
-from app.domain.enums import AssignmentStatus, ProjectStatus, ReportKind, SessionStatus
+from app.domain.enums import (
+    AssignmentStatus,
+    AuditAction,
+    ProjectStatus,
+    ReportKind,
+    SessionStatus,
+)
 from app.infrastructure.database.models import (
+    AdminRole,
+    AuditEvent,
     DailyAnswer,
     DailyAssignment,
     DailyQuestionSnapshot,
@@ -226,6 +235,57 @@ async def test_unknown_project_slug_is_rejected(historical_context) -> None:  # 
         await HistoricalReportService(historical_context).build_report(
             GUILD_ID, ReportKind.WEEKLY, WEEK, project_slug="inexistente"
         )
+
+
+async def test_manual_report_authorizes_resolves_and_audits_without_private_data(
+    historical_context,
+) -> None:  # type: ignore[no-untyped-def]
+    await _seed(historical_context)
+    async with historical_context() as session, session.begin():
+        guild = await session.scalar(select(Guild).where(Guild.discord_guild_id == GUILD_ID))
+        assert guild is not None
+        session.add(AdminRole(guild_id=guild.id, discord_role_id=10))
+    actor = ActorContext(GUILD_ID, "Guild Histórica", 42, (10,), False, False)
+    service = HistoricalReportService(
+        historical_context,
+        clock=lambda: datetime(2026, 8, 21, 15, tzinfo=UTC),
+    )
+
+    manual = await service.build_manual(
+        actor=actor,
+        kind=ReportKind.WEEKLY,
+        period_text="2026-08-21",
+        project_slug=" BETA ",
+        channel_id=700,
+    )
+    with pytest.raises(AuthorizationError):
+        await service.build_manual(
+            actor=ActorContext(GUILD_ID, "Guild Histórica", 99, (), True, True),
+            kind=ReportKind.DAILY,
+            period_text=None,
+            project_slug=None,
+            channel_id=701,
+        )
+
+    assert manual.channel_id == 700
+    assert manual.report.period == WEEK
+    assert [project.slug for project in manual.report.projects] == ["beta"]
+    async with historical_context() as session:
+        events = (
+            await session.scalars(
+                select(AuditEvent).where(AuditEvent.action == AuditAction.MANUAL_REPORT_REQUESTED)
+            )
+        ).all()
+    assert len(events) == 1
+    assert events[0].actor_user_id == actor.user_id
+    assert events[0].target_id == 700
+    assert events[0].details == {
+        "kind": "WEEKLY",
+        "period_start": "2026-08-17",
+        "period_end": "2026-08-23",
+        "project_slug": "beta",
+    }
+    assert "answer" not in repr(events[0].details).casefold()
 
 
 @pytest.mark.parametrize("kind", tuple(ReportKind))
