@@ -2,12 +2,15 @@ import os
 from datetime import time
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.application.dto import ActorContext
 from app.application.errors import AuthorizationError, ConflictError, ValidationError
 from app.application.guild_admin import GuildAdminService
 from app.application.schedule import ScheduleService
+from app.domain.enums import AuditAction
+from app.infrastructure.database.models import AuditEvent
 
 
 def _actor(*, roles: tuple[int, ...] = (), owner: bool = False) -> ActorContext:
@@ -57,6 +60,7 @@ async def test_schedule_defaults_updates_and_reloads_after_success(schedule_cont
     assert initial.timezone == "America/Belem"
     assert initial.execution_days == (0, 1, 2, 3, 4)
     assert initial.formatted_times == ("09:00", "10:30", "11:30", "12:00", "12:10")
+    assert initial.formatted_management_reports == (4, "12:20", "12:20")
 
     changed = await service.update_times(
         actor=actor,
@@ -72,6 +76,69 @@ async def test_schedule_defaults_updates_and_reloads_after_success(schedule_cont
     changed = await service.update_timezone(actor=actor, timezone="America/Sao_Paulo")
     assert changed.timezone == "America/Sao_Paulo"
     assert reloader.guild_ids == [actor.guild_id, actor.guild_id]
+
+
+async def test_management_report_schedule_persists_audits_and_reloads(schedule_context) -> None:  # type: ignore[no-untyped-def]
+    await GuildAdminService(schedule_context).add_admin_role(actor=_actor(owner=True), role_id=10)
+    actor = _actor(roles=(10,))
+    reloader = RecordingReloader()
+    service = ScheduleService(schedule_context, reloader=reloader)
+
+    changed = await service.update_management_reports(
+        actor=actor,
+        weekly_weekday=2,
+        weekly_reporting="13:15",
+        monthly_reporting="14:30",
+    )
+
+    assert changed.formatted_management_reports == (2, "13:15", "14:30")
+    assert reloader.guild_ids == [actor.guild_id]
+    persisted = await ScheduleService(schedule_context).get_schedule(actor=actor)
+    assert persisted.formatted_management_reports == (2, "13:15", "14:30")
+    async with schedule_context() as session:
+        events = (
+            await session.scalars(
+                select(AuditEvent).where(AuditEvent.action == AuditAction.SCHEDULE_UPDATED)
+            )
+        ).all()
+    assert len(events) == 1
+    assert events[0].actor_user_id == actor.user_id
+    assert events[0].details == {
+        "weekly_report_weekday": 2,
+        "weekly_report_time": "13:15",
+        "monthly_report_time": "14:30",
+    }
+
+
+async def test_management_times_before_closing_roll_back_without_reload_or_audit(
+    schedule_context,
+) -> None:  # type: ignore[no-untyped-def]
+    await GuildAdminService(schedule_context).add_admin_role(actor=_actor(owner=True), role_id=10)
+    actor = _actor(roles=(10,))
+    reloader = RecordingReloader()
+    service = ScheduleService(schedule_context, reloader=reloader)
+
+    with pytest.raises(ValidationError, match="fechamento"):
+        await service.update_management_reports(
+            actor=actor,
+            weekly_weekday=4,
+            weekly_reporting="12:00",
+            monthly_reporting="11:59",
+        )
+
+    assert (await service.get_schedule(actor=actor)).formatted_management_reports == (
+        4,
+        "12:20",
+        "12:20",
+    )
+    assert reloader.guild_ids == []
+    async with schedule_context() as session:
+        events = (
+            await session.scalars(
+                select(AuditEvent).where(AuditEvent.action == AuditAction.SCHEDULE_UPDATED)
+            )
+        ).all()
+    assert events == []
 
 
 async def test_schedule_days_are_unique_and_never_empty(schedule_context) -> None:  # type: ignore[no-untyped-def]

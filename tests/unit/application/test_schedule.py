@@ -73,6 +73,26 @@ def test_schedule_summary_formats_all_five_stages() -> None:
         last_reminder=time(11, 30),
         closing=time(12),
         reporting=time(12, 10),
+        weekly_report_weekday=4,
+        weekly_reporting=time(12, 20),
+        monthly_reporting=time(12, 20),
     )
 
     assert schedule.formatted_times == ("09:00", "10:30", "11:30", "12:00", "12:10")
+    assert schedule.formatted_management_reports == (4, "12:20", "12:20")
+
+
+@pytest.mark.parametrize(
+    ("weekday", "weekly", "monthly"),
+    [(7, "12:20", "12:20"), (4, "12:2", "12:20"), (4, "12:20", "25:00")],
+)
+async def test_management_schedule_rejects_invalid_values_before_database_access(
+    weekday: int, weekly: str, monthly: str
+) -> None:
+    with pytest.raises(ValidationError):
+        await ScheduleService(None).update_management_reports(  # type: ignore[arg-type]
+            actor=_actor(),
+            weekly_weekday=weekday,
+            weekly_reporting=weekly,
+            monthly_reporting=monthly,
+        )

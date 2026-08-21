@@ -65,6 +65,9 @@ class ScheduleSummary:
     last_reminder: time
     closing: time
     reporting: time
+    weekly_report_weekday: int = 4
+    weekly_reporting: time = time(12, 20)
+    monthly_reporting: time = time(12, 20)
 
     @property
     def formatted_times(self) -> tuple[str, str, str, str, str]:
@@ -74,6 +77,14 @@ class ScheduleSummary:
             self.last_reminder.strftime("%H:%M"),
             self.closing.strftime("%H:%M"),
             self.reporting.strftime("%H:%M"),
+        )
+
+    @property
+    def formatted_management_reports(self) -> tuple[int, str, str]:
+        return (
+            self.weekly_report_weekday,
+            self.weekly_reporting.strftime("%H:%M"),
+            self.monthly_reporting.strftime("%H:%M"),
         )
 
 

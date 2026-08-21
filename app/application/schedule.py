@@ -8,9 +8,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
 from app.application.dto import ActorContext, ScheduleSummary
 from app.application.errors import ConflictError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
+from app.domain.enums import AuditAction
 from app.infrastructure.database.models import Guild, GuildExecutionDay, GuildSettings
 
 _TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
@@ -82,6 +84,18 @@ class ScheduleService:
                 settings.daily_close_time,
                 settings.daily_report_time,
             ) = parsed
+            self._audit(
+                session,
+                guild=guild,
+                actor=actor,
+                details={
+                    "opening": opening,
+                    "first_reminder": first_reminder,
+                    "last_reminder": last_reminder,
+                    "closing": closing,
+                    "daily_report_time": reporting,
+                },
+            )
             result = self._summary(settings, days)
             discord_guild_id = guild.discord_guild_id
         await self._reload(discord_guild_id)
@@ -99,6 +113,12 @@ class ScheduleService:
         async with self._sessions() as session, session.begin():
             guild, settings, days = await self._authorized_schedule(session, actor)
             settings.timezone = clean_timezone
+            self._audit(
+                session,
+                guild=guild,
+                actor=actor,
+                details={"timezone": clean_timezone},
+            )
             result = self._summary(settings, days)
             discord_guild_id = guild.discord_guild_id
         await self._reload(discord_guild_id)
@@ -113,6 +133,12 @@ class ScheduleService:
             if weekday in days:
                 raise ConflictError("Este dia da semana já está configurado na agenda.")
             session.add(GuildExecutionDay(guild_id=guild.id, weekday=weekday))
+            self._audit(
+                session,
+                guild=guild,
+                actor=actor,
+                details={"execution_day_added": weekday},
+            )
             updated_days = tuple(sorted((*days, weekday)))
             result = self._summary(settings, updated_days)
             discord_guild_id = guild.discord_guild_id
@@ -133,8 +159,54 @@ class ScheduleService:
             if execution_day is None:
                 raise ConflictError("Este dia da semana não está configurado na agenda.")
             await session.delete(execution_day)
+            self._audit(
+                session,
+                guild=guild,
+                actor=actor,
+                details={"execution_day_removed": weekday},
+            )
             updated_days = tuple(day for day in days if day != weekday)
             result = self._summary(settings, updated_days)
+            discord_guild_id = guild.discord_guild_id
+        await self._reload(discord_guild_id)
+        return result
+
+    async def update_management_reports(
+        self,
+        *,
+        actor: ActorContext,
+        weekly_weekday: int,
+        weekly_reporting: str,
+        monthly_reporting: str,
+    ) -> ScheduleSummary:
+        """Change weekly/monthly report stages and reconcile after commit."""
+
+        self._validate_weekday(weekly_weekday)
+        weekly_time = self._parse_time(weekly_reporting)
+        monthly_time = self._parse_time(monthly_reporting)
+        async with self._sessions() as session, session.begin():
+            guild, settings, days = await self._authorized_schedule(session, actor)
+            if (
+                weekly_time <= settings.daily_close_time
+                or monthly_time <= settings.daily_close_time
+            ):
+                raise ValidationError(
+                    "Os relatórios semanal e mensal devem ocorrer após o fechamento da daily."
+                )
+            settings.weekly_report_weekday = weekly_weekday
+            settings.weekly_report_time = weekly_time
+            settings.monthly_report_time = monthly_time
+            self._audit(
+                session,
+                guild=guild,
+                actor=actor,
+                details={
+                    "weekly_report_weekday": weekly_weekday,
+                    "weekly_report_time": weekly_reporting,
+                    "monthly_report_time": monthly_reporting,
+                },
+            )
+            result = self._summary(settings, days)
             discord_guild_id = guild.discord_guild_id
         await self._reload(discord_guild_id)
         return result
@@ -192,4 +264,25 @@ class ScheduleService:
             last_reminder=settings.last_reminder_time,
             closing=settings.daily_close_time,
             reporting=settings.daily_report_time,
+            weekly_report_weekday=settings.weekly_report_weekday,
+            weekly_reporting=settings.weekly_report_time,
+            monthly_reporting=settings.monthly_report_time,
+        )
+
+    @staticmethod
+    def _audit(
+        session: AsyncSession,
+        *,
+        guild: Guild,
+        actor: ActorContext,
+        details: dict[str, object],
+    ) -> None:
+        append_audit_event(
+            session,
+            guild=guild,
+            actor=actor,
+            action=AuditAction.SCHEDULE_UPDATED,
+            target_type="schedule",
+            target_id=guild.discord_guild_id,
+            details=details,
         )
