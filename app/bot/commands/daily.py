@@ -239,7 +239,19 @@ def register_daily_commands(
     service: DailyPresentationService,
     project_service: ProjectPresentationService,
     absence_service: AbsencePresentationService,
+    *,
+    management_service: DailyManagementPresentationService | None = None,
+    closure_gateway: DailyClosureGateway | None = None,
 ) -> None:
     """Register the daily group on a bot command tree."""
 
-    bot.tree.add_command(build_daily_group(bot, service, project_service, absence_service))
+    bot.tree.add_command(
+        build_daily_group(
+            bot,
+            service,
+            project_service,
+            absence_service,
+            management_service=management_service,
+            closure_gateway=closure_gateway,
+        )
+    )

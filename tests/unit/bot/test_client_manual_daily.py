@@ -7,16 +7,22 @@ from app.bot.views.daily import DailyResponseView
 
 
 def _bot() -> ZorysaBot:
-    return ZorysaBot(
-        app_name="Zorysa Daily Bot",
+    bot = ZorysaBot(app_name="Zorysa Daily Bot")
+    bot.bind_application_services(
         guild_admin_service=MagicMock(),
         schedule_service=MagicMock(),
         question_service=MagicMock(),
         report_channel_service=MagicMock(),
+        audit_service=MagicMock(),
         project_service=MagicMock(),
         daily_service=MagicMock(),
         absence_service=MagicMock(),
+        daily_management_service=MagicMock(),
+        daily_gateway=MagicMock(),
+        report_service=MagicMock(),
+        report_gateway=MagicMock(),
     )
+    return bot
 
 
 def test_manual_daily_command_groups_are_registered_together() -> None:
@@ -25,6 +31,8 @@ def test_manual_daily_command_groups_are_registered_together() -> None:
     assert bot.tree.get_command("config") is not None
     assert bot.tree.get_command("projeto") is not None
     assert bot.tree.get_command("daily") is not None
+    assert bot.tree.get_command("membro") is not None
+    assert bot.tree.get_command("relatorio") is not None
     assert bot.tree.get_command("health") is not None
 
 
@@ -36,22 +44,63 @@ def test_config_registers_all_management_subgroups() -> None:
         "agenda",
         "perguntas",
         "relatorios",
+        "auditoria",
     }
 
 
-def test_daily_registers_open_and_justified_absence_commands() -> None:
+def test_daily_registers_open_absence_status_and_close_commands() -> None:
     daily = _bot().tree.get_command("daily")
     assert isinstance(daily, app_commands.Group)
-    assert {command.name for command in daily.commands} == {"abrir", "justificar"}
+    assert {command.name for command in daily.commands} == {
+        "abrir",
+        "justificar",
+        "status",
+        "fechar",
+    }
 
 
-def test_partial_manual_daily_dependencies_are_rejected() -> None:
+def test_application_services_cannot_be_bound_twice() -> None:
+    bot = _bot()
+
     try:
-        ZorysaBot(app_name="Zorysa Daily Bot", guild_admin_service=MagicMock())
+        bot.bind_application_services(
+            guild_admin_service=MagicMock(),
+            schedule_service=MagicMock(),
+            question_service=MagicMock(),
+            report_channel_service=MagicMock(),
+            audit_service=MagicMock(),
+            project_service=MagicMock(),
+            daily_service=MagicMock(),
+            absence_service=MagicMock(),
+            daily_management_service=MagicMock(),
+            daily_gateway=MagicMock(),
+            report_service=MagicMock(),
+            report_gateway=MagicMock(),
+        )
     except ValueError as error:
-        assert "services" in str(error)
+        assert "already" in str(error).lower()
     else:
-        raise AssertionError("partial service composition should fail")
+        raise AssertionError("duplicate service composition should fail")
+
+
+def test_report_group_exposes_manual_generation() -> None:
+    report = _bot().tree.get_command("relatorio")
+    assert isinstance(report, app_commands.Group)
+    assert {command.name for command in report.commands} == {"gerar"}
+
+
+def test_member_group_exposes_project_query() -> None:
+    member = _bot().tree.get_command("membro")
+    assert isinstance(member, app_commands.Group)
+    assert {command.name for command in member.commands} == {"projetos"}
+
+
+def test_audit_group_exposes_paginated_listing() -> None:
+    config = _bot().tree.get_command("config")
+    assert isinstance(config, app_commands.Group)
+    audit = config.get_command("auditoria")
+    assert isinstance(audit, app_commands.Group)
+    assert {command.name for command in audit.commands} == {"listar"}
 
 
 async def test_setup_registers_persistent_daily_view_before_sync() -> None:

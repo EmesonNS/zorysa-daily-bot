@@ -1,5 +1,6 @@
 """Discord client configuration."""
 
+import logging
 from typing import Protocol
 
 import discord
@@ -9,16 +10,25 @@ from app.bot.commands.config import register_config_commands
 from app.bot.commands.daily import register_daily_commands
 from app.bot.commands.health import register_health_command
 from app.bot.commands.project import register_project_commands
+from app.bot.commands.report import register_report_commands
 from app.bot.contracts import (
     AbsencePresentationService,
+    AuditPresentationService,
+    DailyClosureGateway,
+    DailyManagementPresentationService,
     DailyPresentationService,
     GuildAdminPresentationService,
+    ManualReportGateway,
+    ManualReportPresentationService,
+    MemberLifecyclePresentationService,
     ProjectPresentationService,
     QuestionPresentationService,
     ReportChannelPresentationService,
     SchedulePresentationService,
 )
 from app.bot.views.daily import DailyResponseView
+
+logger = logging.getLogger(__name__)
 
 
 class AutomationLifecycle(Protocol):
@@ -39,51 +49,66 @@ class ZorysaBot(commands.Bot):
         *,
         app_name: str,
         guild_id: int | None = None,
-        guild_admin_service: GuildAdminPresentationService | None = None,
-        schedule_service: SchedulePresentationService | None = None,
-        question_service: QuestionPresentationService | None = None,
-        report_channel_service: ReportChannelPresentationService | None = None,
-        project_service: ProjectPresentationService | None = None,
-        daily_service: DailyPresentationService | None = None,
-        absence_service: AbsencePresentationService | None = None,
+        member_lifecycle_service: MemberLifecyclePresentationService | None = None,
         automation_lifecycle: AutomationLifecycle | None = None,
     ) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
+        intents.members = True
         super().__init__(command_prefix=commands.when_mentioned, help_command=None, intents=intents)
 
         self._sync_guild = discord.Object(id=guild_id) if guild_id is not None else None
-        self._daily_service = daily_service
+        self._daily_service: DailyPresentationService | None = None
+        self._member_lifecycle_service = member_lifecycle_service
         self._automation_lifecycle = automation_lifecycle
+        self._application_services_bound = False
         register_health_command(self, app_name=app_name)
-        services = (
+
+    def bind_application_services(
+        self,
+        *,
+        guild_admin_service: GuildAdminPresentationService,
+        schedule_service: SchedulePresentationService,
+        question_service: QuestionPresentationService,
+        report_channel_service: ReportChannelPresentationService,
+        audit_service: AuditPresentationService,
+        project_service: ProjectPresentationService,
+        daily_service: DailyPresentationService,
+        absence_service: AbsencePresentationService,
+        daily_management_service: DailyManagementPresentationService,
+        daily_gateway: DailyClosureGateway,
+        report_service: ManualReportPresentationService,
+        report_gateway: ManualReportGateway,
+    ) -> None:
+        """Register the complete V1 command surface after gateways know this client."""
+
+        if self._application_services_bound:
+            raise ValueError("Application services are already configured")
+        register_config_commands(
+            self.tree,
             guild_admin_service,
             schedule_service,
             question_service,
             report_channel_service,
-            project_service,
-            daily_service,
-            absence_service,
+            audit_service,
         )
-        if any(service is not None for service in services):
-            if any(service is None for service in services):
-                raise ValueError("All manual daily services must be provided together")
-            assert guild_admin_service is not None
-            assert schedule_service is not None
-            assert question_service is not None
-            assert report_channel_service is not None
-            assert project_service is not None
-            assert daily_service is not None
-            assert absence_service is not None
-            register_config_commands(
-                self.tree,
-                guild_admin_service,
-                schedule_service,
-                question_service,
-                report_channel_service,
-            )
-            register_project_commands(self.tree, project_service)
-            register_daily_commands(self, daily_service, project_service, absence_service)
+        register_project_commands(self.tree, project_service)
+        register_daily_commands(
+            self,
+            daily_service,
+            project_service,
+            absence_service,
+            management_service=daily_management_service,
+            closure_gateway=daily_gateway,
+        )
+        register_report_commands(
+            self.tree,
+            report_service,
+            report_gateway,
+            project_service,
+        )
+        self._daily_service = daily_service
+        self._application_services_bound = True
 
     async def setup_hook(self) -> None:
         """Synchronize commands globally or to the configured development guild."""
@@ -115,6 +140,20 @@ class ZorysaBot(commands.Bot):
     async def on_disconnect(self) -> None:
         if self._automation_lifecycle is not None:
             await self._automation_lifecycle.disconnect()
+
+    async def on_raw_member_remove(self, payload: discord.RawMemberRemoveEvent) -> None:
+        """Close future memberships while isolating unavailable persistence."""
+
+        if self._member_lifecycle_service is None:
+            return
+        try:
+            await self._member_lifecycle_service.leave_guild(payload.guild_id, payload.user.id)
+        except Exception:
+            logger.error(
+                "Failed to process member removal for guild %s user %s",
+                payload.guild_id,
+                payload.user.id,
+            )
 
     async def close(self) -> None:
         if self._automation_lifecycle is not None:

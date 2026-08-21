@@ -6,10 +6,48 @@ import pytest
 from app.bot.client import ZorysaBot
 
 
-def test_bot_uses_only_the_guilds_intent() -> None:
+def test_bot_uses_only_guilds_and_members_intents() -> None:
     bot = ZorysaBot(app_name="Zorysa Daily Bot")
 
-    assert bot.intents.value == discord.Intents(guilds=True).value
+    assert bot.intents.value == discord.Intents(guilds=True, members=True).value
+
+
+def test_bot_keeps_presence_and_message_content_intents_disabled() -> None:
+    bot = ZorysaBot(app_name="Zorysa Daily Bot")
+
+    assert bot.intents.presences is False
+    assert bot.intents.message_content is False
+
+
+async def test_raw_member_remove_delegates_guild_and_user_ids() -> None:
+    service = MagicMock(leave_guild=AsyncMock(return_value=2))
+    bot = ZorysaBot(app_name="Zorysa Daily Bot", member_lifecycle_service=service)
+    payload = MagicMock(guild_id=123)
+    payload.user.id = 77
+
+    await bot.on_raw_member_remove(payload)
+
+    service.leave_guild.assert_awaited_once_with(123, 77)
+
+
+async def test_raw_member_remove_is_a_noop_without_bound_service() -> None:
+    bot = ZorysaBot(app_name="Zorysa Daily Bot")
+    payload = MagicMock(guild_id=123)
+    payload.user.id = 77
+
+    await bot.on_raw_member_remove(payload)
+
+
+async def test_raw_member_remove_isolates_service_failure(caplog: pytest.LogCaptureFixture) -> None:
+    service = MagicMock(leave_guild=AsyncMock(side_effect=RuntimeError("private")))
+    bot = ZorysaBot(app_name="Zorysa Daily Bot", member_lifecycle_service=service)
+    payload = MagicMock(guild_id=123)
+    payload.user.id = 77
+
+    await bot.on_raw_member_remove(payload)
+
+    assert "guild 123" in caplog.text and "user 77" in caplog.text
+    assert "private" not in caplog.text
 
 
 @pytest.mark.parametrize("guild_id", [None, 123456789])

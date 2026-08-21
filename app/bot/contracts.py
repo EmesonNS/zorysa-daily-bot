@@ -267,6 +267,12 @@ class AbsencePresentationService(Protocol):
     ) -> JustifiedDaily: ...
 
 
+class MemberLifecyclePresentationService(Protocol):
+    """System membership cleanup consumed by Discord member events."""
+
+    async def leave_guild(self, discord_guild_id: int, discord_user_id: int) -> int: ...
+
+
 __all__ = [
     "ActorContext",
     "AbsencePresentationService",
@@ -288,6 +294,7 @@ __all__ = [
     "MemberSummary",
     "ManualReportGateway",
     "ManualReportPresentationService",
+    "MemberLifecyclePresentationService",
     "JustifiedDaily",
     "OpenedDaily",
     "PresentationError",
