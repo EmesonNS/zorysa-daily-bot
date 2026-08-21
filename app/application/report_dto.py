@@ -3,7 +3,17 @@
 from dataclasses import dataclass
 from datetime import date
 
-from app.domain.enums import AssignmentStatus
+from app.domain.enums import AssignmentStatus, ReportKind
+
+
+@dataclass(frozen=True, slots=True)
+class ReportPeriod:
+    """Inclusive local-date interval selected for one report."""
+
+    kind: ReportKind
+    start: date
+    end: date
+    label: str
 
 
 @dataclass(frozen=True, slots=True)
