@@ -139,7 +139,7 @@ def test_daily_management_migration_upgrades_downgrades_and_reupgrades() -> None
     command.downgrade(config, "0003_automatic_daily")
     asyncio.run(_seed_pre_m3(database_url))
 
-    command.upgrade(config, "head")
+    command.upgrade(config, "0004_daily_management")
     asyncio.run(_exercise_and_assert_upgrade(database_url))
 
     command.downgrade(config, "0003_automatic_daily")
