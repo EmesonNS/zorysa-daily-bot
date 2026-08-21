@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from datetime import datetime, time
 
+from app.domain.enums import AuditAction
+
 
 @dataclass(frozen=True, slots=True)
 class ActorContext:
@@ -73,3 +75,37 @@ class ScheduleSummary:
             self.closing.strftime("%H:%M"),
             self.reporting.strftime("%H:%M"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class AuditFilters:
+    action: AuditAction | None = None
+    actor_user_id: int | None = None
+    target_type: str | None = None
+    target_id: int | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AuditCursor:
+    occurred_at: datetime
+    event_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class AuditEventSummary:
+    id: int
+    guild_id: int
+    actor_user_id: int | None
+    action: AuditAction
+    target_type: str
+    target_id: int
+    details: dict[str, object]
+    occurred_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AuditPage:
+    events: tuple[AuditEventSummary, ...]
+    next_cursor: AuditCursor | None
