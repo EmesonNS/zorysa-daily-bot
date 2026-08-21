@@ -1,86 +1,124 @@
 # Zorysa Daily Bot
 
-Bot de daily para Discord, com Slash Commands, PostgreSQL assíncrono e migrations Alembic.
+Bot de daily para Discord com Slash Commands, PostgreSQL assíncrono, migrations Alembic,
+automação por guild, relatórios históricos e auditoria administrativa.
 
 ## Requisitos
 
-- Python 3.12 para execução local
-- Docker com Docker Compose para a stack em containers
-- Uma aplicação de bot criada no Discord Developer Portal
+- Docker com Docker Compose para a execução recomendada;
+- Python 3.12 para desenvolvimento local;
+- uma aplicação de bot criada no Discord Developer Portal.
 
 ## Configuração
 
-Crie o arquivo local de ambiente e substitua todos os valores `replace-with-*`:
+Crie o arquivo local e substitua todos os valores `replace-with-*`:
 
 ```bash
 cp .env.example .env
 ```
 
-Nunca publique o `.env` nem o token do Discord. `DISCORD_GUILD_ID` é opcional e acelera a
-sincronização dos comandos durante o desenvolvimento; sem ele, os comandos são globais.
+Nunca publique `.env`, `DISCORD_TOKEN` ou `DATABASE_URL`. `DISCORD_GUILD_ID` é opcional: use o
+ID de uma guild de desenvolvimento para sincronizar comandos imediatamente. Sem ele, os comandos
+são globais e podem demorar para aparecer.
+
+## Configuração mínima no Discord
+
+No Discord Developer Portal:
+
+1. Em **Bot > Privileged Gateway Intents**, habilite somente **Server Members Intent**. Mantenha
+   **Presence Intent** e **Message Content Intent** desabilitados.
+2. Em **OAuth2 > URL Generator**, selecione os escopos `bot` e `applications.commands`.
+3. Conceda somente `View Channels`, `Send Messages`, `Embed Links` e `Read Message History` nos
+   canais usados pelo bot. Não conceda `Administrator`.
+4. Convide o bot e execute `/health` para conferir nome, latência e guild atual.
+
+O intent `members` permite receber a saída de membros e encerrar memberships futuras. O bot não lê
+mensagens, presença nem conteúdo fora das interações explícitas.
 
 ## Execução com Docker
 
-O `DATABASE_URL` do exemplo já usa o hostname `db`, adequado à rede do Compose:
+O `DATABASE_URL` de `.env.example` usa o hostname `db`, correto dentro do Compose:
 
 ```bash
-docker compose up --build
+docker compose up --build -d
+docker compose logs -f bot
 ```
 
-O Compose inicia PostgreSQL 17 com volume persistente, aguarda o healthcheck, executa
-`alembic upgrade head` e só então inicia o bot. Para encerrar:
+PostgreSQL e bot usam `restart: unless-stopped`. O bot aguarda o healthcheck, executa
+`alembic upgrade head` e inicia apenas depois. Para reiniciar ou inspecionar:
+
+```bash
+docker compose restart bot
+docker compose ps
+docker compose logs --tail=200 bot db
+```
+
+Para encerrar sem perder o banco:
 
 ```bash
 docker compose down
 ```
 
-O volume `postgres_data` é preservado por esse comando.
+O volume nomeado `postgres_data` é preservado. Só use `docker compose down -v` se quiser remover
+deliberadamente todos os dados locais.
 
 ## Execução local
-
-Crie o ambiente virtual e instale as dependências:
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 ```
 
-Inicie PostgreSQL e altere no `.env` o hostname do banco de `db` para `localhost`. Depois,
-aplique as migrations e execute o ponto de entrada:
+Altere apenas o hostname do `DATABASE_URL` de `db` para `localhost`, mantenha o PostgreSQL ativo e
+execute:
 
 ```bash
 .venv/bin/alembic upgrade head
 .venv/bin/python -m app.main
 ```
 
-## Configuração mínima no Discord
+## Administração inicial
 
-No Discord Developer Portal:
+O primeiro cargo administrativo pode ser cadastrado pelo dono ou por alguém com `Gerenciar
+Servidor`. Depois disso, somente cargos cadastrados administram o bot.
 
-1. Em **Bot**, copie o token para `DISCORD_TOKEN` e mantenha desabilitados os intents
-   privilegiados (`Presence`, `Server Members` e `Message Content`). O bot usa apenas o intent
-   de guilds.
-2. Em **OAuth2 > URL Generator**, selecione os escopos `bot` e `applications.commands`.
-3. Nas permissões do bot, selecione `View Channels`, `Send Messages`, `Embed Links` e
-   `Read Message History`, gere o convite e adicione o bot ao servidor desejado.
+- `/config admin role-adicionar cargo`
+- `/config admin role-remover cargo`
+- `/config admin roles`
 
-Após conectar, use `/health` para verificar o nome do bot, a latência e a guild atual.
+Respostas administrativas são efêmeras. Tokens, respostas de daily e motivos de ausência não são
+gravados nem exibidos na auditoria.
 
-## Daily manual
+## Comandos da V1
 
-O primeiro cargo administrativo deve ser cadastrado pelo dono do servidor ou por alguém com
-`Gerenciar Servidor`. Depois disso, somente os cargos cadastrados administram o bot:
+### Projetos e membros
 
-1. `/config admin role-adicionar cargo:@Administradores`
-2. `/projeto criar nome:AmazHealth canal:#daily-amazhealth`
-3. `/projeto membro-adicionar projeto:amazhealth usuario:@Pessoa`
-4. `/daily abrir projeto:amazhealth`
+- `/projeto criar nome canal`
+- `/projeto editar projeto nome canal daily-habilitada`
+- `/projeto detalhes projeto`
+- `/projeto arquivar projeto`
+- `/projeto listar`
+- `/projeto membro-adicionar projeto usuario`
+- `/projeto membro-remover projeto usuario`
+- `/projeto membros projeto`
+- `/membro projetos usuario`
 
-Use `/projeto listar`, `/projeto membros` e `/config admin roles` para consultar a configuração.
-Participantes respondem pelo botão **Responder daily** e pelo modal privado. A mensagem pública
-mostra apenas quem respondeu; o conteúdo das respostas permanece no banco.
+Os campos de projeto oferecem autocomplete. Arquivar preserva sessões, assignments, respostas e
+relatórios históricos, encerra memberships ativas e impede novas dailies.
 
-As perguntas são administradas sem alterar o código:
+### Daily
+
+- `/daily abrir projeto`
+- `/daily justificar projeto membro motivo data`
+- `/daily status projeto data`
+- `/daily fechar projeto data`
+
+`data` é opcional no formato `AAAA-MM-DD` e usa o dia local da guild quando omitida. A abertura
+menciona participantes; lembretes mencionam somente pendentes. O painel público mostra estado, não
+respostas. No fechamento, pendentes passam para `NOT_ANSWERED`, o botão é removido e justificativas
+continuam privadas.
+
+### Perguntas
 
 - `/config perguntas listar`
 - `/config perguntas adicionar texto obrigatoria`
@@ -89,70 +127,92 @@ As perguntas são administradas sem alterar o código:
 - `/config perguntas ativar pergunta`
 - `/config perguntas desativar pergunta`
 
-IDs de perguntas e projetos possuem autocomplete. A configuração aceita entre uma e cinco
-perguntas ativas; sessões já abertas preservam seus snapshots.
+São permitidas de uma a cinco perguntas ativas. Sessões abertas preservam snapshots, portanto
+alterações posteriores não reescrevem o histórico.
 
-Se `DISCORD_GUILD_ID` estiver configurado, reinicie o container para sincronizar os novos comandos
-imediatamente nessa guild. Sem essa variável, a sincronização é global e pode levar mais tempo.
-
-## Daily automática
-
-Cada servidor possui uma agenda própria. Os defaults são segunda a sexta no timezone
-`America/Belem`: abertura às `09:00`, primeiro lembrete às `10:30`, último lembrete às `11:30`,
-fechamento às `12:00` e relatório diário às `12:10`.
-
-Os comandos administrativos são:
+### Agenda automática
 
 - `/config agenda visualizar`
 - `/config agenda horarios abertura primeiro-lembrete ultimo-lembrete fechamento relatorio`
 - `/config agenda timezone valor`
 - `/config agenda dia-adicionar dia`
 - `/config agenda dia-remover dia`
+- `/config agenda relatorios dia-semanal horario-semanal horario-mensal`
 
-Alterações são aplicadas sem reiniciar o bot. Na abertura, cada projeto ativo e habilitado com
-participantes recebe uma sessão e todos são mencionados. Os lembretes mencionam somente quem
-ainda não respondeu. No fechamento, pendentes passam para `NOT_ANSWERED`, o botão é removido e o
-painel mostra ✅ para quem respondeu e ❌ para quem não respondeu; respostas privadas nunca são
-publicadas.
+Defaults em `America/Belem`: segunda a sexta, abertura `09:00`, lembretes `10:30` e `11:30`,
+fechamento `12:00`, diário `12:10`, semanal sexta-feira `12:20` e mensal `12:20` no último dia de
+execução configurado do mês. Horários gerenciais precisam ser posteriores ao fechamento. Mudanças
+persistem, são auditadas e reconciliam os sete jobs sem reiniciar o bot.
 
-Administradores podem registrar ausência com
-`/daily justificar projeto membro motivo data`. A data é opcional (`AAAA-MM-DD`); sem ela, o bot
-usa a data local do servidor. O painel mostra 🏖️, mas o motivo permanece privado no banco.
+### Destinos e relatórios
 
-Destinos gerenciais são configurados por `/config relatorios canais`,
-`/config relatorios canal-salvar` e `/config relatorios canal-remover`. Um canal pode ser marcado
-para relatórios diários, semanais e mensais; nesta etapa somente o relatório diário é agendado.
-O relatório apresenta métricas, estados e respostas completas, pagina automaticamente dentro dos
-limites do Discord e desabilita todas as menções. Reservations persistidas e nonces determinísticos
-evitam uma segunda publicação lógica em retries. Uma falha em um canal não impede os demais.
+- `/config relatorios canais`
+- `/config relatorios canal-salvar canal diario semanal mensal`
+- `/config relatorios canal-remover canal`
+- `/relatorio gerar tipo periodo projeto`
 
-Se o bot reconectar entre abertura e fechamento, ele cria sessões que estiverem faltando e segue
-somente com as próximas etapas. Lembretes vencidos não são repetidos. Sessões abertas cujo prazo
-já passou são encerradas imediatamente, inclusive se forem de um dia anterior.
+O relatório manual aceita diário (`AAAA-MM-DD`), semanal (`AAAA-MM-DD`, semana ISO da data) e
+mensal (`AAAA-MM`); período e projeto são opcionais. Relatórios automáticos diário, semanal e mensal
+usam somente os destinos habilitados para o tipo. O conteúdo é paginado sem truncamento e usa
+`AllowedMentions.none()`. Reservations persistidas e nonces determinísticos impedem segunda
+publicação lógica em retries; uma falha de canal não bloqueia os demais destinos.
 
-### UAT rápido em uma guild de teste
+### Auditoria
 
-1. Confirme `/health`, um cargo administrativo, um projeto, seu canal e ao menos um participante.
-2. Use `/config agenda visualizar` e confirme timezone e dia atual.
-3. Configure duas perguntas de teste e dois canais com relatório diário habilitado.
-4. Em `/config agenda horarios`, informe cinco horários futuros separados por poucos minutos,
-   sempre na ordem abertura < primeiro lembrete < último lembrete < fechamento < relatório.
-5. Observe a abertura; faça um participante responder, justifique outro com `/daily justificar` e
-   deixe um terceiro sem resposta. Confirme ✅, 🏖️ e ❌ no painel após o fechamento.
-6. Confirme que os dois canais recebem o relatório paginado uma única vez, com métricas corretas,
-   respostas completas e nenhuma notificação por menção.
-7. Restaure os defaults `09:00`, `10:30`, `11:30`, `12:00` e `12:10`, além das perguntas e canais.
+- `/config auditoria listar acao ator alvo-tipo alvo-id inicio fim cursor`
 
-Faça esse teste apenas em uma guild e canal de desenvolvimento. O bot real usa o relógio e o
-timezone configurados; não é necessário expor token, URL do banco ou qualquer resposta privada.
+Todos os filtros são opcionais; datas usam `AAAA-MM-DD`. O comando retorna dez eventos por página
+e fornece o próximo `cursor`. A consulta é efêmera e mostra apenas ação, instante e IDs operacionais,
+sem respostas, justificativas ou segredos.
+
+## Recuperação e consistência
+
+Ao conectar ou reiniciar, o bot reconstrói os sete jobs por guild. Ele fecha sessões abertas já
+vencidas, garante a abertura do dia quando aplicável e recupera no máximo os relatórios diário,
+semanal ou mensal devidos no dia local corrente. Não há rajada retroativa; períodos antigos ficam
+disponíveis por `/relatorio gerar`.
+
+Sessões, respostas, reservations e auditoria ficam no PostgreSQL. A saída de um membro encerra
+somente memberships ativas para sessões futuras e preserva assignments já criados. Falhas de canal,
+membro, guild ou banco são isoladas por IDs operacionais para que outras guilds e projetos continuem.
+
+## UAT histórico em uma guild de desenvolvimento
+
+Faça este roteiro somente em uma guild/canais de teste e nunca compartilhe token, URL do banco ou
+respostas privadas.
+
+1. Habilite **Server Members Intent**, inicie com `docker compose up --build -d` e acompanhe
+   `docker compose logs -f bot`; confirme `/health`.
+2. Cadastre cargo, dois projetos, três participantes e perguntas. Confira `/projeto detalhes`,
+   `/membro projetos` e `/config auditoria listar`.
+3. Configure dias e horários futuros próximos, respeitando abertura < lembretes < fechamento <
+   diário. Configure semanal para o dia atual e, se o dia for o último habilitado do mês, valide
+   também o mensal.
+4. Configure dois canais para diário, semanal e mensal. Remova temporariamente `Send Messages` de
+   um deles para simular falha; confirme que o outro recebe o relatório e o bot permanece online.
+5. Aguarde a abertura, responda por um participante, justifique outro e deixe o terceiro pendente.
+   Confirme ✅, 🏖️ e ❌ após o fechamento, sem respostas ou motivo no painel.
+6. Confirme uma única publicação automática diária e semanal; no último dia configurado do mês,
+   confirme a mensal. Use `/relatorio gerar` para validar manualmente os três períodos.
+7. Execute `docker compose restart bot` após a abertura e depois de uma publicação. Confirme que a
+   daily e os jobs voltam, sem duplicar mensagens lógicas nem recuperar períodos anteriores.
+8. Remova um membro da guild e confirme que `/projeto membros` deixa de mostrá-lo em projetos
+   futuros, enquanto relatórios antigos permanecem iguais.
+9. Arquive um projeto, confira `/projeto detalhes` e gere relatório histórico filtrado para ele.
+10. Consulte a auditoria por ação, ator, alvo e período; valide paginação e ausência de respostas,
+    motivo, token ou credencial.
+11. Restaure permissões, agenda, perguntas, destinos e participantes de teste.
 
 ## Gate de qualidade
+
+Com PostgreSQL acessível pelo `DATABASE_URL` local:
 
 ```bash
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/mypy app
 .venv/bin/pytest -q
+.venv/bin/alembic check
 docker compose --env-file .env.example config
 docker compose --env-file .env.example build bot
 ```
