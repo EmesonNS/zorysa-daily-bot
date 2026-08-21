@@ -11,7 +11,8 @@ from app.application.errors import AuthorizationError, ConflictError
 from app.application.guild_admin import DEFAULT_DAILY_QUESTIONS, GuildAdminService
 from app.application.projects import ProjectService
 from app.application.questions import QuestionService
-from app.infrastructure.database.models import DailyQuestionSnapshot
+from app.domain.enums import AuditAction
+from app.infrastructure.database.models import AuditEvent, DailyQuestionSnapshot
 
 
 def _actor(*, roles: tuple[int, ...] = (), owner: bool = False) -> ActorContext:
@@ -113,6 +114,58 @@ async def test_active_question_bounds_preserve_configuration(question_context) -
     with pytest.raises(ConflictError, match="cinco"):
         await service.set_question_active(actor=actor, question_id=sixth.id, active=True)
     assert fifth.active is True
+
+
+async def test_question_mutations_are_audited_without_text_or_failed_attempts(
+    question_context,
+) -> None:  # type: ignore[no-untyped-def]
+    actor = await _configured_actor(question_context)
+    service = QuestionService(question_context)
+    defaults = await service.list_questions(actor=actor)
+
+    added = await service.add_question(actor=actor, text="Texto privado", required=False)
+    with pytest.raises(ConflictError, match="cinco"):
+        await service.add_question(actor=actor, text="Tentativa rejeitada", required=True)
+    await service.edit_question(
+        actor=actor,
+        question_id=defaults[0].id,
+        text="Texto alterado",
+        required=False,
+    )
+    await service.move_question(actor=actor, question_id=defaults[-1].id, position=1)
+    await service.set_question_active(actor=actor, question_id=added.id, active=False)
+    await service.set_question_active(actor=actor, question_id=added.id, active=False)
+    await service.set_question_active(actor=actor, question_id=added.id, active=True)
+
+    async with question_context() as session:
+        events = (
+            await session.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.target_type == "daily_question")
+                .order_by(AuditEvent.id)
+            )
+        ).all()
+
+    assert [AuditAction(event.action) for event in events] == [
+        AuditAction.QUESTION_ADDED,
+        AuditAction.QUESTION_EDITED,
+        AuditAction.QUESTION_MOVED,
+        AuditAction.QUESTION_DEACTIVATED,
+        AuditAction.QUESTION_ACTIVATED,
+    ]
+    assert [event.target_id for event in events] == [
+        added.id,
+        defaults[0].id,
+        defaults[-1].id,
+        added.id,
+        added.id,
+    ]
+    assert events[0].details == {"position": 5, "required": False, "active": True}
+    assert events[1].details == {"required": False, "active": True}
+    assert events[2].details == {"previous_position": 4, "position": 1}
+    assert events[3].details == {"active": False}
+    assert events[4].details == {"active": True}
+    assert all("text" not in event.details for event in events)
 
 
 async def test_requires_configured_admin_role(question_context) -> None:  # type: ignore[no-untyped-def]

@@ -4,9 +4,11 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
 from app.application.dto import ActorContext, QuestionSummary
 from app.application.errors import ConflictError, NotFoundError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
+from app.domain.enums import AuditAction
 from app.infrastructure.database.models import DailyQuestion, Guild
 
 MAX_ACTIVE_QUESTIONS = 5
@@ -53,6 +55,19 @@ class QuestionService:
                 )
                 session.add(question)
                 await session.flush()
+                append_audit_event(
+                    session,
+                    guild=guild,
+                    actor=actor,
+                    action=AuditAction.QUESTION_ADDED,
+                    target_type="daily_question",
+                    target_id=question.id,
+                    details={
+                        "position": question.position,
+                        "required": question.required,
+                        "active": question.active,
+                    },
+                )
                 return self._summary(question)
         except IntegrityError as error:
             raise ConflictError("As perguntas foram alteradas; tente novamente.") from error
@@ -74,6 +89,15 @@ class QuestionService:
             question.text = clean_text
             question.required = required
             await session.flush()
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=AuditAction.QUESTION_EDITED,
+                target_type="daily_question",
+                target_id=question.id,
+                details={"required": question.required, "active": question.active},
+            )
             return self._summary(question)
 
     async def move_question(
@@ -92,6 +116,7 @@ class QuestionService:
                 moving = next((item for item in questions if item.id == question_id), None)
                 if moving is None:
                     raise NotFoundError("Pergunta não encontrada neste servidor.")
+                previous_position = moving.position
                 reordered = [item for item in questions if item.id != question_id]
                 reordered.insert(position - 1, moving)
 
@@ -105,6 +130,15 @@ class QuestionService:
                 for new_position, question in enumerate(reordered, start=1):
                     question.position = new_position
                 await session.flush()
+                append_audit_event(
+                    session,
+                    guild=guild,
+                    actor=actor,
+                    action=AuditAction.QUESTION_MOVED,
+                    target_type="daily_question",
+                    target_id=moving.id,
+                    details={"previous_position": previous_position, "position": position},
+                )
                 return tuple(self._summary(question) for question in reordered)
         except IntegrityError as error:
             raise ConflictError("As perguntas foram reordenadas em outra interação.") from error
@@ -130,6 +164,17 @@ class QuestionService:
                 raise ConflictError("A daily deve manter ao menos uma pergunta ativa.")
             question.active = active
             await session.flush()
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=(
+                    AuditAction.QUESTION_ACTIVATED if active else AuditAction.QUESTION_DEACTIVATED
+                ),
+                target_type="daily_question",
+                target_id=question.id,
+                details={"active": active},
+            )
             return self._summary(question)
 
     async def _authorized_guild(self, session: AsyncSession, actor: ActorContext) -> Guild:
