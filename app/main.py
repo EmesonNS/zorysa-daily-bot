@@ -12,8 +12,8 @@ from pydantic import ValidationError
 from app.application.absences import AbsenceService
 from app.application.automatic_daily import AutomaticDailyService
 from app.application.daily import DailyService
-from app.application.daily_reports import DailyReportService
 from app.application.guild_admin import GuildAdminService
+from app.application.historical_reports import HistoricalReportService
 from app.application.projects import ProjectService
 from app.application.questions import QuestionService
 from app.application.report_channels import ReportChannelService
@@ -67,7 +67,7 @@ async def run(settings: Settings) -> None:
             automatic_service=automatic_service,
             gateway=DiscordDailyGateway(bot, daily_service, automatic_service),
         )
-        report_service = DailyReportService(database.sessions)
+        report_service = HistoricalReportService(database.sessions, timezone=settings.timezone)
         coordinator.bind_reports(
             report_service,
             DiscordReportGateway(bot, report_service),

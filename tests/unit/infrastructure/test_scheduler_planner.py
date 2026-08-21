@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -7,6 +7,7 @@ from app.application.dto import ScheduleSummary
 from app.infrastructure.scheduler.planner import (
     RecoveryAction,
     ScheduleStage,
+    is_last_execution_day,
     plan_schedule,
 )
 
@@ -41,7 +42,7 @@ def _local_datetime(
     return datetime(year, month, day, hour, minute, tzinfo=ZoneInfo(timezone))
 
 
-def test_plan_builds_five_cron_triggers_with_configured_timezone_days_and_times() -> None:
+def test_plan_builds_seven_cron_triggers_with_configured_timezone_and_times() -> None:
     schedule = _schedule(execution_days=(0, 2, 4))
 
     plan = plan_schedule(schedule, _local_datetime(2026, 8, 19, 8))
@@ -51,9 +52,13 @@ def test_plan_builds_five_cron_triggers_with_configured_timezone_days_and_times(
         ScheduleStage.FIRST_REMINDER,
         ScheduleStage.LAST_REMINDER,
         ScheduleStage.CLOSE,
-        ScheduleStage.REPORT,
+        ScheduleStage.DAILY_REPORT,
+        ScheduleStage.WEEKLY_REPORT,
+        ScheduleStage.MONTHLY_REPORT,
     )
     assert tuple(str(job.trigger.timezone) for job in plan.jobs) == (
+        "America/Belem",
+        "America/Belem",
         "America/Belem",
         "America/Belem",
         "America/Belem",
@@ -67,6 +72,8 @@ def test_plan_builds_five_cron_triggers_with_configured_timezone_days_and_times(
         datetime(2026, 8, 19, 11, 30, tzinfo=ZoneInfo("America/Belem")),
         datetime(2026, 8, 19, 12, 0, tzinfo=ZoneInfo("America/Belem")),
         datetime(2026, 8, 19, 12, 10, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 21, 12, 20, tzinfo=ZoneInfo("America/Belem")),
+        datetime(2026, 8, 26, 12, 20, tzinfo=ZoneInfo("America/Belem")),
     )
     now = _local_datetime(2026, 8, 19, 8)
     assert tuple(job.trigger.get_next_fire_time(None, now) for job in plan.jobs) == expected
@@ -159,5 +166,82 @@ def test_report_trigger_is_strictly_after_close() -> None:
 
 
 def test_report_stage_never_appears_as_recovery_action() -> None:
-    plan = plan_schedule(_schedule(), _local_datetime(2026, 8, 19, 13))
+    plan = plan_schedule(_schedule(), _local_datetime(2026, 8, 19, 12, 5))
     assert plan.recovery_actions == (RecoveryAction.CLOSE_OVERDUE,)
+
+
+def test_weekly_trigger_uses_configured_weekday_independent_of_execution_days() -> None:
+    schedule = _schedule(execution_days=(0, 2))
+    schedule = ScheduleSummary(
+        **{
+            field: getattr(schedule, field)
+            for field in (
+                "timezone",
+                "daily_enabled",
+                "execution_days",
+                "opening",
+                "first_reminder",
+                "last_reminder",
+                "closing",
+                "reporting",
+            )
+        },
+        weekly_report_weekday=4,
+        weekly_reporting=time(13, 15),
+    )
+
+    plan = plan_schedule(schedule, _local_datetime(2026, 8, 19, 8))
+    weekly = next(job for job in plan.jobs if job.stage == ScheduleStage.WEEKLY_REPORT)
+
+    assert weekly.trigger.get_next_fire_time(None, _local_datetime(2026, 8, 19, 8)) == (
+        _local_datetime(2026, 8, 21, 13, 15)
+    )
+
+
+def test_monthly_trigger_fires_on_last_candidates_for_configured_execution_days() -> None:
+    plan = plan_schedule(
+        _schedule(execution_days=(0, 2, 4)),
+        _local_datetime(2026, 8, 1, 8),
+    )
+    monthly = next(job for job in plan.jobs if job.stage == ScheduleStage.MONTHLY_REPORT)
+
+    assert "last mon,last wed,last fri" in str(monthly.trigger)
+    assert monthly.trigger.get_next_fire_time(None, _local_datetime(2026, 8, 1, 8)) == (
+        _local_datetime(2026, 8, 26, 12, 20)
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate", "execution_days", "expected"),
+    [
+        (date(2026, 8, 28), (0, 1, 2, 3, 4), False),
+        (date(2026, 8, 31), (0, 1, 2, 3, 4), True),
+        (date(2026, 8, 28), (2, 4), True),
+        (date(2026, 8, 29), (0, 1, 2, 3, 4), False),
+        (date(2026, 12, 31), (3,), True),
+        (date(2028, 2, 29), (1,), True),
+        (date(2026, 12, 31), (), False),
+    ],
+)
+def test_last_execution_day_predicate(
+    candidate: date,
+    execution_days: tuple[int, ...],
+    expected: bool,
+) -> None:
+    assert is_last_execution_day(candidate, execution_days) is expected
+
+
+def test_recovery_includes_only_reports_due_on_current_local_day() -> None:
+    friday = plan_schedule(_schedule(), _local_datetime(2026, 8, 21, 12, 30))
+    month_end = plan_schedule(_schedule(), _local_datetime(2026, 8, 31, 12, 30))
+
+    assert friday.recovery_actions == (
+        RecoveryAction.CLOSE_OVERDUE,
+        RecoveryAction.PUBLISH_DAILY_REPORT,
+        RecoveryAction.PUBLISH_WEEKLY_REPORT,
+    )
+    assert month_end.recovery_actions == (
+        RecoveryAction.CLOSE_OVERDUE,
+        RecoveryAction.PUBLISH_DAILY_REPORT,
+        RecoveryAction.PUBLISH_MONTHLY_REPORT,
+    )

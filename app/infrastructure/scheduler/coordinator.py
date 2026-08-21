@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily_dto import ClosedDaily, OpenedDaily, PreparedReminder
 from app.application.dto import ScheduleSummary
-from app.application.report_dto import PreparedDailyReport
-from app.domain.enums import NotificationKind, SessionStatus
+from app.application.report_dto import PreparedReport
+from app.domain.enums import NotificationKind, ReportKind, SessionStatus
 from app.infrastructure.database.models import (
     DailySession,
     Guild,
@@ -26,6 +26,7 @@ from app.infrastructure.scheduler.planner import (
     RecoveryAction,
     SchedulePlan,
     ScheduleStage,
+    is_last_execution_day,
     plan_schedule,
 )
 
@@ -104,15 +105,15 @@ class DailyGateway(Protocol):
     async def publish_closed(self, closed: ClosedDaily) -> None: ...
 
 
-class DailyReportOperations(Protocol):
+class HistoricalReportOperations(Protocol):
     async def prepare_deliveries(
-        self, guild_id: int, local_date: date
-    ) -> tuple[PreparedDailyReport, ...]: ...
+        self, guild_id: int, kind: ReportKind, local_date: date
+    ) -> tuple[PreparedReport, ...]: ...
 
 
 class ReportGateway(Protocol):
-    async def publish_all(
-        self, reports: tuple[PreparedDailyReport, ...]
+    async def publish_all_reports(
+        self, reports: tuple[PreparedReport, ...]
     ) -> tuple[Exception, ...]: ...
 
 
@@ -169,6 +170,9 @@ class DatabaseScheduleSource:
                     GuildSettings.last_reminder_time,
                     GuildSettings.daily_close_time,
                     GuildSettings.daily_report_time,
+                    GuildSettings.weekly_report_weekday,
+                    GuildSettings.weekly_report_time,
+                    GuildSettings.monthly_report_time,
                 )
                 .join(GuildSettings, GuildSettings.guild_id == Guild.id)
                 .order_by(Guild.discord_guild_id)
@@ -199,6 +203,9 @@ class DatabaseScheduleSource:
                             last_reminder=row.last_reminder_time,
                             closing=row.daily_close_time,
                             reporting=row.daily_report_time,
+                            weekly_report_weekday=row.weekly_report_weekday,
+                            weekly_reporting=row.weekly_report_time,
+                            monthly_reporting=row.monthly_report_time,
                         ),
                     )
                 )
@@ -221,13 +228,13 @@ class SchedulerCoordinator:
         self._schedule_source = schedule_source
         self._automatic_service = automatic_service
         self._gateway = gateway
-        self._report_service: DailyReportOperations | None = None
+        self._report_service: HistoricalReportOperations | None = None
         self._report_gateway: ReportGateway | None = None
         self._clock = clock or (lambda: datetime.now(UTC))
         self._active_tasks: set[asyncio.Task[object]] = set()
 
     def bind_reports(
-        self, report_service: DailyReportOperations, report_gateway: ReportGateway
+        self, report_service: HistoricalReportOperations, report_gateway: ReportGateway
     ) -> None:
         """Bind the report stage after Discord and persistence are composed."""
 
@@ -306,11 +313,14 @@ class SchedulerCoordinator:
                     discord_guild_id, plan.local_date
                 )
                 await self._publish_closed(discord_guild_id, closed)
-            elif self._report_service is not None and self._report_gateway is not None:
-                reports = await self._report_service.prepare_deliveries(
-                    discord_guild_id, plan.local_date
-                )
-                await self._report_gateway.publish_all(reports)
+            elif stage == ScheduleStage.DAILY_REPORT:
+                await self._publish_report(discord_guild_id, ReportKind.DAILY, plan.local_date)
+            elif stage == ScheduleStage.WEEKLY_REPORT:
+                await self._publish_report(discord_guild_id, ReportKind.WEEKLY, plan.local_date)
+            elif stage == ScheduleStage.MONTHLY_REPORT and is_last_execution_day(
+                plan.local_date, schedule.execution_days
+            ):
+                await self._publish_report(discord_guild_id, ReportKind.MONTHLY, plan.local_date)
         except Exception:
             logger.exception(
                 "Automatic daily stage %s failed for guild %s",
@@ -384,6 +394,29 @@ class SchedulerCoordinator:
                 plan.local_date,
             )
             await self._publish_opened(record.discord_guild_id, opened)
+
+        report_recoveries = (
+            (RecoveryAction.PUBLISH_DAILY_REPORT, ReportKind.DAILY),
+            (RecoveryAction.PUBLISH_WEEKLY_REPORT, ReportKind.WEEKLY),
+            (RecoveryAction.PUBLISH_MONTHLY_REPORT, ReportKind.MONTHLY),
+        )
+        for action, kind in report_recoveries:
+            if action not in plan.recovery_actions:
+                continue
+            try:
+                await self._publish_report(record.discord_guild_id, kind, plan.local_date)
+            except Exception:
+                logger.exception(
+                    "Failed to recover %s report for guild %s",
+                    kind.value,
+                    record.discord_guild_id,
+                )
+
+    async def _publish_report(self, guild_id: int, kind: ReportKind, local_date: date) -> None:
+        if self._report_service is None or self._report_gateway is None:
+            return
+        reports = await self._report_service.prepare_deliveries(guild_id, kind, local_date)
+        await self._report_gateway.publish_all_reports(reports)
 
     async def _publish_opened(self, guild_id: int, opened: tuple[OpenedDaily, ...]) -> None:
         for item in opened:

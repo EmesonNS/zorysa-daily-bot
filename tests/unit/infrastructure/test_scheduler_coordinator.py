@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.application.dto import ScheduleSummary
-from app.domain.enums import NotificationKind
+from app.domain.enums import NotificationKind, ReportKind
 from app.infrastructure.scheduler.coordinator import (
     GuildSchedule,
     SchedulerCoordinator,
@@ -99,7 +99,7 @@ def _coordinator(
     return coordinator, actual_scheduler, actual_source, service, gateway
 
 
-async def test_reconcile_guild_adds_or_replaces_five_stable_jobs() -> None:
+async def test_reconcile_guild_adds_or_replaces_seven_stable_jobs() -> None:
     coordinator, scheduler, _, _, _ = _coordinator(now=datetime(2026, 8, 19, 11, 0, tzinfo=UTC))
 
     await coordinator.reconcile_guild(81)
@@ -109,7 +109,9 @@ async def test_reconcile_guild_adds_or_replaces_five_stable_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
-        "guild:81:report",
+        "guild:81:daily-report",
+        "guild:81:weekly-report",
+        "guild:81:monthly-report",
     ]
     for call, stage in zip(scheduler.added, ScheduleStage, strict=True):
         assert call["func"] == coordinator.run_stage
@@ -121,8 +123,8 @@ async def test_reconcile_guild_adds_or_replaces_five_stable_jobs() -> None:
 
     await coordinator.reconcile_guild(81)
 
-    assert len(scheduler.added) == 10
-    assert len(scheduler.jobs) == 5
+    assert len(scheduler.added) == 14
+    assert len(scheduler.jobs) == 7
 
 
 async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
@@ -131,7 +133,9 @@ async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
-        "guild:81:report",
+        "guild:81:daily-report",
+        "guild:81:weekly-report",
+        "guild:81:monthly-report",
         "guild:999:open",
         "unrelated:job",
     )
@@ -149,7 +153,9 @@ async def test_reconcile_removes_disabled_and_obsolete_scheduler_jobs() -> None:
         "guild:81:reminder1",
         "guild:81:reminder2",
         "guild:81:close",
-        "guild:81:report",
+        "guild:81:daily-report",
+        "guild:81:weekly-report",
+        "guild:81:monthly-report",
         "guild:999:open",
     }
     assert set(scheduler.jobs) == {"unrelated:job"}
@@ -234,7 +240,7 @@ async def test_reconcile_all_isolates_one_guild_recovery_failure() -> None:
 
     await coordinator.reconcile_all()
 
-    assert len(scheduler.added) == 10
+    assert len(scheduler.added) == 14
     service.open_guild.assert_awaited_once_with(82, date(2026, 8, 19))
 
 
@@ -249,19 +255,38 @@ async def test_run_stage_contains_service_failure_inside_its_guild_job() -> None
     gateway.publish_opened.assert_not_awaited()
 
 
-async def test_run_report_stage_prepares_and_publishes_deliveries() -> None:
+async def test_run_daily_and_weekly_report_stages_publish_their_period_kind() -> None:
     coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 19, 15, 10, tzinfo=UTC))
     report_service = AsyncMock()
     report_service.prepare_deliveries.return_value = (SimpleNamespace(delivery_id=7),)
     report_gateway = AsyncMock()
     coordinator.bind_reports(report_service, report_gateway)
 
-    await coordinator.run_stage(81, ScheduleStage.REPORT)
+    for stage in (
+        ScheduleStage.DAILY_REPORT,
+        ScheduleStage.WEEKLY_REPORT,
+    ):
+        await coordinator.run_stage(81, stage)
 
-    report_service.prepare_deliveries.assert_awaited_once_with(81, date(2026, 8, 19))
-    report_gateway.publish_all.assert_awaited_once_with(
-        report_service.prepare_deliveries.return_value
+    assert [call.args for call in report_service.prepare_deliveries.await_args_list] == [
+        (81, ReportKind.DAILY, date(2026, 8, 19)),
+        (81, ReportKind.WEEKLY, date(2026, 8, 19)),
+    ]
+    assert report_gateway.publish_all_reports.await_count == 2
+
+
+async def test_monthly_stage_publishes_on_last_execution_day() -> None:
+    coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 31, 15, 20, tzinfo=UTC))
+    report_service = AsyncMock(prepare_deliveries=AsyncMock(return_value=()))
+    report_gateway = AsyncMock()
+    coordinator.bind_reports(report_service, report_gateway)
+
+    await coordinator.run_stage(81, ScheduleStage.MONTHLY_REPORT)
+
+    report_service.prepare_deliveries.assert_awaited_once_with(
+        81, ReportKind.MONTHLY, date(2026, 8, 31)
     )
+    report_gateway.publish_all_reports.assert_awaited_once_with(())
 
 
 async def test_report_stage_with_no_destinations_finishes_cleanly() -> None:
@@ -270,9 +295,36 @@ async def test_report_stage_with_no_destinations_finishes_cleanly() -> None:
     report_service.prepare_deliveries.return_value = ()
     report_gateway = AsyncMock()
     coordinator.bind_reports(report_service, report_gateway)
-    await coordinator.run_stage(81, ScheduleStage.REPORT)
-    report_gateway.publish_all.assert_awaited_once_with(())
+    await coordinator.run_stage(81, ScheduleStage.DAILY_REPORT)
+    report_gateway.publish_all_reports.assert_awaited_once_with(())
 
 
 def test_report_job_id_is_stable() -> None:
-    assert SchedulerCoordinator._job_id(81, ScheduleStage.REPORT) == "guild:81:report"
+    assert SchedulerCoordinator._job_id(81, ScheduleStage.DAILY_REPORT) == ("guild:81:daily-report")
+
+
+async def test_monthly_stage_skips_candidate_that_is_not_last_execution_day() -> None:
+    coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 28, 15, 20, tzinfo=UTC))
+    report_service = AsyncMock()
+    report_gateway = AsyncMock()
+    coordinator.bind_reports(report_service, report_gateway)
+
+    await coordinator.run_stage(81, ScheduleStage.MONTHLY_REPORT)
+
+    report_service.prepare_deliveries.assert_not_awaited()
+    report_gateway.publish_all_reports.assert_not_awaited()
+
+
+async def test_recovery_publishes_only_due_reports_for_current_local_date() -> None:
+    coordinator, _, _, _, _ = _coordinator(now=datetime(2026, 8, 21, 15, 30, tzinfo=UTC))
+    report_service = AsyncMock(prepare_deliveries=AsyncMock(return_value=()))
+    report_gateway = AsyncMock()
+    coordinator.bind_reports(report_service, report_gateway)
+
+    await coordinator.reconcile_guild(81)
+
+    assert [call.args for call in report_service.prepare_deliveries.await_args_list] == [
+        (81, ReportKind.DAILY, date(2026, 8, 21)),
+        (81, ReportKind.WEEKLY, date(2026, 8, 21)),
+    ]
+    assert report_gateway.publish_all_reports.await_count == 2
