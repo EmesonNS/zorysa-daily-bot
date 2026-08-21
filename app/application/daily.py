@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.daily_dto import (
+    ClosedDaily,
     DailyPanel,
     DailyParticipant,
     DailyResponseForm,
@@ -336,4 +337,42 @@ async def _open_project_session(
         panel=await DailyService._panel(session, daily_session, project.name),
         channel_id=project.discord_channel_id,
         message_id=None,
+    )
+
+
+async def _close_daily_session(
+    session: AsyncSession,
+    *,
+    daily_session: DailySession,
+    project: Project,
+    closed_at: datetime,
+) -> tuple[ClosedDaily, bool]:
+    """Close one locked session and return whether this call changed its state."""
+
+    transitioned = daily_session.status == SessionStatus.OPEN
+    if transitioned:
+        daily_session.status = SessionStatus.CLOSED
+        if daily_session.closed_at is None:
+            daily_session.closed_at = closed_at
+        assignments = (
+            await session.scalars(
+                select(DailyAssignment).where(
+                    DailyAssignment.session_id == daily_session.id,
+                    DailyAssignment.status == AssignmentStatus.PENDING,
+                )
+            )
+        ).all()
+        for assignment in assignments:
+            assignment.status = AssignmentStatus.NOT_ANSWERED
+    await session.flush()
+    if daily_session.closed_at is None:
+        raise RuntimeError("Sessão fechada sem instante de fechamento.")
+    return (
+        ClosedDaily(
+            panel=await DailyService._panel(session, daily_session, project.name),
+            channel_id=project.discord_channel_id,
+            message_id=daily_session.message_id,
+            closed_at=daily_session.closed_at,
+        ),
+        transitioned,
     )

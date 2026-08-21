@@ -7,7 +7,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.daily import DailyService, _open_project_session
+from app.application.daily import DailyService, _close_daily_session, _open_project_session
 from app.application.daily_dto import (
     ClosedDaily,
     OpenedDaily,
@@ -104,35 +104,13 @@ class AutomaticDailyService:
             ).all()
             closed: list[ClosedDaily] = []
             for daily_session, project in rows:
-                if daily_session.status == SessionStatus.OPEN:
-                    daily_session.status = SessionStatus.CLOSED
-                    if daily_session.closed_at is None:
-                        daily_session.closed_at = self._now()
-                    assignments = (
-                        await session.scalars(
-                            select(DailyAssignment).where(
-                                DailyAssignment.session_id == daily_session.id,
-                                DailyAssignment.status == AssignmentStatus.PENDING,
-                            )
-                        )
-                    ).all()
-                    for assignment in assignments:
-                        assignment.status = AssignmentStatus.NOT_ANSWERED
-                await session.flush()
-                if daily_session.closed_at is None:
-                    raise RuntimeError("Sessão fechada sem instante de fechamento.")
-                closed.append(
-                    ClosedDaily(
-                        panel=await DailyService._panel(
-                            session,
-                            daily_session,
-                            project.name,
-                        ),
-                        channel_id=project.discord_channel_id,
-                        message_id=daily_session.message_id,
-                        closed_at=daily_session.closed_at,
-                    )
+                result, _ = await _close_daily_session(
+                    session,
+                    daily_session=daily_session,
+                    project=project,
+                    closed_at=self._now(),
                 )
+                closed.append(result)
             return tuple(closed)
 
     async def _eligible_project_ids(self, discord_guild_id: int) -> tuple[int, ...]:

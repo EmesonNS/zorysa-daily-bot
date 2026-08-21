@@ -7,12 +7,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
 from app.application.daily import DailyService
 from app.application.daily_dto import JustifiedDaily
 from app.application.dto import ActorContext
 from app.application.errors import ConflictError, NotFoundError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
-from app.domain.enums import AssignmentStatus
+from app.domain.enums import AssignmentStatus, AuditAction
 from app.infrastructure.database.models import (
     DailyAssignment,
     DailySession,
@@ -91,6 +92,20 @@ class AbsenceService:
             assignment.excused_by_user_id = actor.user_id
             assignment.excuse_reason = clean_reason
             await session.flush()
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=AuditAction.ABSENCE_JUSTIFIED,
+                target_type="daily_assignment",
+                target_id=assignment.id,
+                details={
+                    "project_id": project.id,
+                    "session_id": daily_session.id,
+                    "user_id": user_id,
+                    "session_date": daily_session.session_date.isoformat(),
+                },
+            )
             return JustifiedDaily(
                 panel=await DailyService._panel(session, daily_session, project.name),
                 channel_id=project.discord_channel_id,

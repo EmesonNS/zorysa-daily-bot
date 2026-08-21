@@ -12,8 +12,8 @@ from app.application.dto import ActorContext
 from app.application.errors import AuthorizationError, ConflictError
 from app.application.guild_admin import GuildAdminService
 from app.application.projects import ProjectService
-from app.domain.enums import AssignmentStatus
-from app.infrastructure.database.models import DailyAssignment
+from app.domain.enums import AssignmentStatus, AuditAction
+from app.infrastructure.database.models import AuditEvent, DailyAssignment
 
 TODAY = date(2026, 8, 20)
 
@@ -68,6 +68,15 @@ async def test_justifies_pending_and_keeps_reason_private(absence_context) -> No
         assert assignment.excuse_reason == "Consulta"
         assert assignment.excused_by_user_id == actor.user_id
         assert assignment.excused_at == now
+        event = await session.scalar(
+            select(AuditEvent).where(AuditEvent.action == AuditAction.ABSENCE_JUSTIFIED)
+        )
+        assert event is not None
+        assert event.actor_user_id == actor.user_id
+        assert event.details["session_id"] == session_id
+        assert event.details["user_id"] == 200
+        assert "reason" not in event.details
+        assert "Consulta" not in repr(event.details)
 
 
 async def test_repeated_justification_updates_metadata_idempotently(absence_context) -> None:  # type: ignore[no-untyped-def]
