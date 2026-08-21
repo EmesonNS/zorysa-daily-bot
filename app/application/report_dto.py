@@ -17,6 +17,45 @@ class ReportPeriod:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalReportEntry:
+    """One participant snapshot for one project session and local date."""
+
+    local_date: date
+    user_id: int
+    display_name: str
+    status: AssignmentStatus
+    answers: tuple["DailyReportAnswer", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalReportProject:
+    """Historical session entries grouped under their snapshotted project identity."""
+
+    name: str
+    slug: str
+    entries: tuple[HistoricalReportEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalReport:
+    """Guild-scoped report consolidated over an inclusive period."""
+
+    kind: ReportKind
+    period: ReportPeriod
+    metrics: "DailyReportMetrics"
+    projects: tuple[HistoricalReportProject, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedReport:
+    """Persisted automatic delivery ready for publication."""
+
+    delivery_id: int
+    channel_id: int
+    report: HistoricalReport
+
+
+@dataclass(frozen=True, slots=True)
 class DailyReportMetrics:
     project_count: int
     unique_participants: int
