@@ -6,8 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
 from app.application.dto import ActorContext, AdminRoleSummary
 from app.application.errors import AuthorizationError, ConflictError
+from app.domain.enums import AuditAction
 from app.infrastructure.database.models import (
     AdminRole,
     DailyQuestion,
@@ -122,6 +124,15 @@ class GuildAdminService:
                 if existing is not None:
                     raise ConflictError("Este cargo já é administrador do bot.")
                 session.add(AdminRole(guild_id=guild.id, discord_role_id=role_id))
+                append_audit_event(
+                    session,
+                    guild=guild,
+                    actor=actor,
+                    action=AuditAction.ADMIN_ROLE_ADDED,
+                    target_type="admin_role",
+                    target_id=role_id,
+                    details={},
+                )
         except IntegrityError as error:
             raise ConflictError("Este cargo já é administrador do bot.") from error
         return AdminRoleSummary(role_id=role_id)
@@ -143,6 +154,15 @@ class GuildAdminService:
             if len(configured) == 1:
                 raise ConflictError("Não é possível remover o último cargo administrativo.")
             await session.delete(role)
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=AuditAction.ADMIN_ROLE_REMOVED,
+                target_type="admin_role",
+                target_id=role_id,
+                details={},
+            )
 
     async def list_admin_roles(self, *, actor: ActorContext) -> tuple[AdminRoleSummary, ...]:
         """List configured administrator roles in stable order."""

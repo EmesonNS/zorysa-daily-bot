@@ -9,7 +9,9 @@ from app.application.dto import ActorContext
 from app.application.errors import AuthorizationError, ConflictError
 from app.application.guild_admin import DEFAULT_DAILY_QUESTIONS, GuildAdminService
 from app.application.projects import ProjectService
+from app.domain.enums import AuditAction
 from app.infrastructure.database.models import (
+    AuditEvent,
     DailyQuestion,
     Guild,
     ProjectMembership,
@@ -72,6 +74,8 @@ async def test_admin_bootstrap_defaults_and_last_role_guard(service_context) -> 
 
     configured_actor = _actor(roles=(10,))
     await service.add_admin_role(actor=configured_actor, role_id=20)
+    with pytest.raises(ConflictError):
+        await service.add_admin_role(actor=configured_actor, role_id=20)
     assert [role.role_id for role in await service.list_admin_roles(actor=configured_actor)] == [
         10,
         20,
@@ -80,6 +84,14 @@ async def test_admin_bootstrap_defaults_and_last_role_guard(service_context) -> 
     await service.remove_admin_role(actor=configured_actor, role_id=20)
     with pytest.raises(ConflictError, match="último cargo"):
         await service.remove_admin_role(actor=configured_actor, role_id=10)
+
+    async with service_context() as session:
+        events = (await session.scalars(select(AuditEvent).order_by(AuditEvent.id))).all()
+    assert [(event.action, event.actor_user_id, event.target_id) for event in events] == [
+        (AuditAction.ADMIN_ROLE_ADDED, 42, 10),
+        (AuditAction.ADMIN_ROLE_ADDED, 42, 20),
+        (AuditAction.ADMIN_ROLE_REMOVED, 42, 20),
+    ]
 
 
 async def test_project_membership_exit_and_reentry_preserve_history(service_context) -> None:  # type: ignore[no-untyped-def]

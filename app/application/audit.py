@@ -14,7 +14,6 @@ from app.application.dto import (
     AuditPage,
 )
 from app.application.errors import ValidationError
-from app.application.guild_admin import authorize_admin, ensure_guild_record
 from app.domain.enums import AuditAction
 from app.infrastructure.database.models import AuditEvent, Guild
 
@@ -101,6 +100,8 @@ class AuditService:
         limit: int = 25,
     ) -> AuditPage:
         """Return one authorized keyset page in reverse chronological order."""
+
+        from app.application.guild_admin import authorize_admin, ensure_guild_record
 
         if not 1 <= limit <= 100:
             raise ValidationError("Informe um limite de auditoria entre 1 e 100.")
