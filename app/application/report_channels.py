@@ -4,9 +4,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.audit import append_audit_event
 from app.application.dto import ActorContext, ReportChannelSummary
 from app.application.errors import ConflictError, NotFoundError, ValidationError
 from app.application.guild_admin import authorize_admin, ensure_guild_record
+from app.domain.enums import AuditAction
 from app.infrastructure.database.models import Guild, ReportChannel
 
 
@@ -73,6 +75,15 @@ class ReportChannelService:
                     channel.weekly_enabled = weekly
                     channel.monthly_enabled = monthly
                 await session.flush()
+                append_audit_event(
+                    session,
+                    guild=guild,
+                    actor=actor,
+                    action=AuditAction.REPORT_CHANNEL_SAVED,
+                    target_type="report_channel",
+                    target_id=channel_id,
+                    details=self._audit_details(channel),
+                )
                 return self._summary(channel)
         except IntegrityError as error:
             raise ConflictError(
@@ -94,6 +105,15 @@ class ReportChannelService:
             )
             if channel is None:
                 raise NotFoundError("Este canal não está configurado para relatórios.")
+            append_audit_event(
+                session,
+                guild=guild,
+                actor=actor,
+                action=AuditAction.REPORT_CHANNEL_REMOVED,
+                target_type="report_channel",
+                target_id=channel_id,
+                details=self._audit_details(channel),
+            )
             await session.delete(channel)
 
     async def _authorized_guild(self, session: AsyncSession, actor: ActorContext) -> Guild:
@@ -121,3 +141,12 @@ class ReportChannelService:
             weekly=channel.weekly_enabled,
             monthly=channel.monthly_enabled,
         )
+
+    @staticmethod
+    def _audit_details(channel: ReportChannel) -> dict[str, object]:
+        return {
+            "channel_id": channel.discord_channel_id,
+            "daily": channel.daily_enabled,
+            "weekly": channel.weekly_enabled,
+            "monthly": channel.monthly_enabled,
+        }

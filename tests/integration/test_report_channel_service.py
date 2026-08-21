@@ -6,10 +6,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.application.dto import ActorContext
-from app.application.errors import AuthorizationError, NotFoundError
+from app.application.errors import AuthorizationError, NotFoundError, ValidationError
 from app.application.guild_admin import GuildAdminService
 from app.application.report_channels import ReportChannelService
-from app.infrastructure.database.models import DailyReportDelivery, Guild, ReportChannel
+from app.domain.enums import AuditAction
+from app.infrastructure.database.models import AuditEvent, DailyReportDelivery, Guild, ReportChannel
 
 
 def _actor(
@@ -99,6 +100,60 @@ async def test_remove_preserves_historical_delivery(report_channel_context) -> N
         assert await session.scalar(select(func.count(DailyReportDelivery.id))) == 1
     with pytest.raises(NotFoundError):
         await service.remove_channel(actor=actor, channel_id=100)
+
+
+async def test_channel_mutations_are_audited_and_failed_attempts_are_not(
+    report_channel_context,
+) -> None:  # type: ignore[no-untyped-def]
+    actor = await _configured_actor(report_channel_context)
+    service = ReportChannelService(report_channel_context)
+
+    await service.save_channel(actor=actor, channel_id=100, daily=True, weekly=False, monthly=False)
+    await service.save_channel(actor=actor, channel_id=100, daily=False, weekly=True, monthly=True)
+    with pytest.raises(ValidationError, match="ao menos um"):
+        await service.save_channel(
+            actor=actor, channel_id=200, daily=False, weekly=False, monthly=False
+        )
+    with pytest.raises(AuthorizationError):
+        await service.save_channel(
+            actor=_actor(owner=True),
+            channel_id=200,
+            daily=True,
+            weekly=False,
+            monthly=False,
+        )
+    await service.remove_channel(actor=actor, channel_id=100)
+    with pytest.raises(NotFoundError):
+        await service.remove_channel(actor=actor, channel_id=100)
+
+    async with report_channel_context() as session:
+        events = (
+            await session.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.target_type == "report_channel")
+                .order_by(AuditEvent.id)
+            )
+        ).all()
+
+    assert [AuditAction(event.action) for event in events] == [
+        AuditAction.REPORT_CHANNEL_SAVED,
+        AuditAction.REPORT_CHANNEL_SAVED,
+        AuditAction.REPORT_CHANNEL_REMOVED,
+    ]
+    assert [event.target_id for event in events] == [100, 100, 100]
+    assert events[0].details == {
+        "channel_id": 100,
+        "daily": True,
+        "weekly": False,
+        "monthly": False,
+    }
+    assert events[1].details == {
+        "channel_id": 100,
+        "daily": False,
+        "weekly": True,
+        "monthly": True,
+    }
+    assert events[2].details == events[1].details
 
 
 async def test_channels_are_isolated_by_guild(report_channel_context) -> None:  # type: ignore[no-untyped-def]
