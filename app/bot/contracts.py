@@ -21,6 +21,7 @@ from app.application.dto import (
     ActorContext,
     AdminRoleSummary,
     MemberSummary,
+    ProjectDetails,
     ProjectSummary,
     QuestionSummary,
     ReportChannelSummary,
@@ -122,6 +123,28 @@ class ProjectPresentationService(Protocol):
 
     async def list_projects(self, *, actor: ActorContext) -> tuple[ProjectSummary, ...]: ...
 
+    async def edit_project(
+        self,
+        *,
+        actor: ActorContext,
+        project_slug: str,
+        name: str,
+        channel_id: int,
+        daily_enabled: bool,
+    ) -> ProjectSummary: ...
+
+    async def archive_project(
+        self, *, actor: ActorContext, project_slug: str
+    ) -> ProjectSummary: ...
+
+    async def project_details(
+        self, *, actor: ActorContext, project_slug: str
+    ) -> ProjectDetails: ...
+
+    async def list_member_projects(
+        self, *, actor: ActorContext, user_id: int
+    ) -> tuple[ProjectSummary, ...]: ...
+
     async def add_member(
         self,
         *,
@@ -209,6 +232,7 @@ __all__ = [
     "JustifiedDaily",
     "OpenedDaily",
     "PresentationError",
+    "ProjectDetails",
     "ProjectPresentationService",
     "ProjectSummary",
     "QuestionPrompt",

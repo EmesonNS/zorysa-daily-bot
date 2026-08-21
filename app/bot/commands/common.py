@@ -30,6 +30,8 @@ async def autocomplete_projects(
     interaction: discord.Interaction,
     current: str,
     service: ProjectPresentationService,
+    *,
+    statuses: frozenset[str] | None = None,
 ) -> list[app_commands.Choice[str]]:
     """Suggest registered projects by name or slug without surfacing lookup errors."""
 
@@ -42,7 +44,8 @@ async def autocomplete_projects(
     matching = (
         project
         for project in projects
-        if not query or query in project.name.casefold() or query in project.slug.casefold()
+        if (statuses is None or project.status in statuses)
+        and (not query or query in project.name.casefold() or query in project.slug.casefold())
     )
     return [
         app_commands.Choice(
