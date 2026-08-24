@@ -137,6 +137,13 @@ class ZorysaBot(commands.Bot):
         if self._automation_lifecycle is not None:
             await self._automation_lifecycle.ready()
 
+    async def on_resumed(self) -> None:
+        """Restore scheduler processing after Discord resumes the session."""
+
+        if self._automation_lifecycle is not None:
+            logger.info("Discord session resumed; restoring scheduler")
+            await self._automation_lifecycle.ready()
+
     async def on_disconnect(self) -> None:
         if self._automation_lifecycle is not None:
             await self._automation_lifecycle.disconnect()

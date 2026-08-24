@@ -110,3 +110,13 @@ async def test_bot_delegates_scheduler_lifecycle_and_closes_it_first() -> None:
     lifecycle.setup.assert_awaited_once_with()
     lifecycle.ready.assert_awaited_once_with()
     lifecycle.disconnect.assert_awaited_once_with()
+
+
+async def test_bot_restores_scheduler_when_discord_session_resumes() -> None:
+    lifecycle = MagicMock()
+    lifecycle.ready = AsyncMock()
+    bot = ZorysaBot(app_name="Zorysa Daily Bot", automation_lifecycle=lifecycle)
+
+    await bot.on_resumed()
+
+    lifecycle.ready.assert_awaited_once_with()
